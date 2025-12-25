@@ -70,6 +70,16 @@ pub async fn get_settings() -> Result<std::collections::HashMap<String, String>,
     Ok(std::collections::HashMap::new())
 }
 
+// Generic paginated list
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceList<T> {
+    pub items: Vec<T>,
+    pub total: u32,
+    pub page: u32,
+    pub per_page: u32,
+    pub continue_token: Option<String>,
+}
+
 // Example with DateTime and other external types
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {

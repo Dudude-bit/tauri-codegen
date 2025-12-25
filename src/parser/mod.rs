@@ -26,8 +26,12 @@ pub struct CommandArg {
 pub struct RustStruct {
     /// Name of the struct
     pub name: String,
+    /// Generic type parameters (e.g., ["T", "U"])
+    pub generics: Vec<String>,
     /// Struct fields
     pub fields: Vec<StructField>,
+    /// Source file where the struct was found
+    pub source_file: std::path::PathBuf,
 }
 
 /// Represents a struct field
@@ -46,6 +50,8 @@ pub struct RustEnum {
     pub name: String,
     /// Enum variants
     pub variants: Vec<EnumVariant>,
+    /// Source file where the enum was found
+    pub source_file: std::path::PathBuf,
 }
 
 /// Represents an enum variant
@@ -88,6 +94,8 @@ pub enum RustType {
     Tuple(Vec<RustType>),
     /// Reference to a custom type (struct or enum)
     Custom(String),
+    /// Generic type parameter (T, U, K, V, etc.)
+    Generic(String),
     /// Unit type ()
     Unit,
     /// Unknown type (fallback)

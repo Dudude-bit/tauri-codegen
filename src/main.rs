@@ -102,6 +102,45 @@ fn run_generate(config_path: &std::path::Path, verbose: bool) -> Result<()> {
         }
     }
 
+    // Check for duplicate struct/enum names (error on duplicates)
+    let mut seen_structs: std::collections::HashMap<String, std::path::PathBuf> =
+        std::collections::HashMap::new();
+    let mut seen_enums: std::collections::HashMap<String, std::path::PathBuf> =
+        std::collections::HashMap::new();
+    let mut has_duplicates = false;
+
+    for s in &parse_result.structs {
+        if let Some(existing_file) = seen_structs.get(&s.name) {
+            eprintln!(
+                "Error: Duplicate struct '{}' found:\n  - {}\n  - {}\nPlease rename one of them or use #[serde(rename = \"...\")]",
+                s.name,
+                existing_file.display(),
+                s.source_file.display()
+            );
+            has_duplicates = true;
+        } else {
+            seen_structs.insert(s.name.clone(), s.source_file.clone());
+        }
+    }
+
+    for e in &parse_result.enums {
+        if let Some(existing_file) = seen_enums.get(&e.name) {
+            eprintln!(
+                "Error: Duplicate enum '{}' found:\n  - {}\n  - {}\nPlease rename one of them or use #[serde(rename = \"...\")]",
+                e.name,
+                existing_file.display(),
+                e.source_file.display()
+            );
+            has_duplicates = true;
+        } else {
+            seen_enums.insert(e.name.clone(), e.source_file.clone());
+        }
+    }
+
+    if has_duplicates {
+        anyhow::bail!("Duplicate type names found. Please resolve conflicts before generating.");
+    }
+
     // Summary
     println!(
         "Parsed {} commands, {} structs, {} enums",

@@ -34,7 +34,15 @@ fn generate_interface(s: &RustStruct, ctx: &GeneratorContext) -> String {
     let mut output = String::new();
 
     let interface_name = ctx.format_type_name(&s.name);
-    output.push_str(&format!("export interface {} {{\n", interface_name));
+    
+    // Add generic parameters if present
+    let generics_str = if s.generics.is_empty() {
+        String::new()
+    } else {
+        format!("<{}>", s.generics.join(", "))
+    };
+    
+    output.push_str(&format!("export interface {}{} {{\n", interface_name, generics_str));
 
     for field in &s.fields {
         let ts_type = rust_to_typescript(&field.ty, ctx);

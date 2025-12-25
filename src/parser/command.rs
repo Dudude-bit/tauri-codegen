@@ -1,5 +1,6 @@
 use super::{CommandArg, RustType, TauriCommand};
 use anyhow::Result;
+use std::collections::HashSet;
 use std::path::Path;
 use syn::{FnArg, GenericArgument, ItemFn, PathArguments, ReturnType, Type};
 
@@ -169,16 +170,26 @@ fn parse_return_type(return_type: &ReturnType) -> Option<RustType> {
     }
 }
 
-/// Parse a Rust type into our RustType representation
+/// Parse a Rust type into our RustType representation (without generic context)
 pub fn parse_type(ty: &Type) -> RustType {
+    parse_type_with_context(ty, &HashSet::new())
+}
+
+/// Parse a Rust type with known generic parameters from the parent struct/enum
+pub fn parse_type_with_context(ty: &Type, generic_params: &HashSet<String>) -> RustType {
     match ty {
         Type::Path(type_path) => {
             if let Some(segment) = type_path.path.segments.last() {
                 let name = segment.ident.to_string();
 
+                // First check if it's a known generic parameter from the context
+                if generic_params.contains(&name) {
+                    return RustType::Generic(name);
+                }
+
                 match name.as_str() {
                     // Primitive types
-                    "String" | "str" => RustType::Primitive("String".to_string()),
+                    "String" | "str" | "char" => RustType::Primitive("String".to_string()),
                     "i8" | "i16" | "i32" | "i64" | "i128" | "isize" => {
                         RustType::Primitive(name.clone())
                     }
@@ -210,21 +221,21 @@ pub fn parse_type(ty: &Type) -> RustType {
                     // Generic types
                     "Vec" => {
                         if let Some(inner) = extract_single_generic(&segment.arguments) {
-                            RustType::Vec(Box::new(parse_type(&inner)))
+                            RustType::Vec(Box::new(parse_type_with_context(&inner, generic_params)))
                         } else {
                             RustType::Unknown("Vec<?>".to_string())
                         }
                     }
                     "Option" => {
                         if let Some(inner) = extract_single_generic(&segment.arguments) {
-                            RustType::Option(Box::new(parse_type(&inner)))
+                            RustType::Option(Box::new(parse_type_with_context(&inner, generic_params)))
                         } else {
                             RustType::Unknown("Option<?>".to_string())
                         }
                     }
                     "Result" => {
                         if let Some(inner) = extract_single_generic(&segment.arguments) {
-                            RustType::Result(Box::new(parse_type(&inner)))
+                            RustType::Result(Box::new(parse_type_with_context(&inner, generic_params)))
                         } else {
                             RustType::Unknown("Result<?>".to_string())
                         }
@@ -232,15 +243,15 @@ pub fn parse_type(ty: &Type) -> RustType {
                     "HashMap" | "BTreeMap" => {
                         if let Some((key, value)) = extract_two_generics(&segment.arguments) {
                             RustType::HashMap {
-                                key: Box::new(parse_type(&key)),
-                                value: Box::new(parse_type(&value)),
+                                key: Box::new(parse_type_with_context(&key, generic_params)),
+                                value: Box::new(parse_type_with_context(&value, generic_params)),
                             }
                         } else {
                             RustType::Unknown("HashMap<?, ?>".to_string())
                         }
                     }
 
-                    // Custom types
+                    // Custom types (not a known generic param)
                     _ => RustType::Custom(name),
                 }
             } else {
@@ -252,19 +263,19 @@ pub fn parse_type(ty: &Type) -> RustType {
             if tuple.elems.is_empty() {
                 RustType::Unit
             } else {
-                let types = tuple.elems.iter().map(parse_type).collect();
+                let types = tuple.elems.iter().map(|t| parse_type_with_context(t, generic_params)).collect();
                 RustType::Tuple(types)
             }
         }
 
         Type::Reference(reference) => {
             // For references, we parse the inner type
-            parse_type(&reference.elem)
+            parse_type_with_context(&reference.elem, generic_params)
         }
 
         Type::Slice(slice) => {
             // Treat slices like Vec
-            RustType::Vec(Box::new(parse_type(&slice.elem)))
+            RustType::Vec(Box::new(parse_type_with_context(&slice.elem, generic_params)))
         }
 
         _ => RustType::Unknown(format!("{:?}", ty)),

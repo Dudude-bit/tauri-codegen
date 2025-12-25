@@ -1,10 +1,11 @@
-use super::{command::parse_type, EnumVariant, RustEnum, RustStruct, StructField, VariantData};
+use super::{command::{parse_type, parse_type_with_context}, EnumVariant, RustEnum, RustStruct, StructField, VariantData};
 use anyhow::Result;
+use std::collections::HashSet;
 use std::path::Path;
 use syn::{Fields, Item, ItemEnum, ItemStruct};
 
 /// Parse a Rust source file and extract structs and enums
-pub fn parse_types(content: &str, _source_file: &Path) -> Result<(Vec<RustStruct>, Vec<RustEnum>)> {
+pub fn parse_types(content: &str, source_file: &Path) -> Result<(Vec<RustStruct>, Vec<RustEnum>)> {
     let syntax = syn::parse_file(content)?;
     let mut structs = Vec::new();
     let mut enums = Vec::new();
@@ -13,14 +14,14 @@ pub fn parse_types(content: &str, _source_file: &Path) -> Result<(Vec<RustStruct
         match item {
             Item::Struct(item_struct) => {
                 if is_serializable(&item_struct.attrs) {
-                    if let Some(s) = parse_struct(&item_struct) {
+                    if let Some(s) = parse_struct(&item_struct, source_file) {
                         structs.push(s);
                     }
                 }
             }
             Item::Enum(item_enum) => {
                 if is_serializable(&item_enum.attrs) {
-                    if let Some(e) = parse_enum(&item_enum) {
+                    if let Some(e) = parse_enum(&item_enum, source_file) {
                         enums.push(e);
                     }
                 }
@@ -32,14 +33,14 @@ pub fn parse_types(content: &str, _source_file: &Path) -> Result<(Vec<RustStruct
                         match mod_item {
                             Item::Struct(item_struct) => {
                                 if is_serializable(&item_struct.attrs) {
-                                    if let Some(s) = parse_struct(&item_struct) {
+                                    if let Some(s) = parse_struct(&item_struct, source_file) {
                                         structs.push(s);
                                     }
                                 }
                             }
                             Item::Enum(item_enum) => {
                                 if is_serializable(&item_enum.attrs) {
-                                    if let Some(e) = parse_enum(&item_enum) {
+                                    if let Some(e) = parse_enum(&item_enum, source_file) {
                                         enums.push(e);
                                     }
                                 }
@@ -73,8 +74,25 @@ fn is_serializable(attrs: &[syn::Attribute]) -> bool {
 }
 
 /// Parse a struct into our RustStruct representation
-fn parse_struct(item: &ItemStruct) -> Option<RustStruct> {
+fn parse_struct(item: &ItemStruct, source_file: &Path) -> Option<RustStruct> {
     let name = item.ident.to_string();
+
+    // Extract generic type parameters
+    let generics: Vec<String> = item
+        .generics
+        .params
+        .iter()
+        .filter_map(|param| {
+            if let syn::GenericParam::Type(type_param) = param {
+                Some(type_param.ident.to_string())
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Create a set for efficient lookup when parsing field types
+    let generic_params: HashSet<String> = generics.iter().cloned().collect();
 
     let fields = match &item.fields {
         Fields::Named(named) => named
@@ -82,7 +100,7 @@ fn parse_struct(item: &ItemStruct) -> Option<RustStruct> {
             .iter()
             .filter_map(|field| {
                 let field_name = field.ident.as_ref()?.to_string();
-                let field_type = parse_type(&field.ty);
+                let field_type = parse_type_with_context(&field.ty, &generic_params);
 
                 // Check for serde rename attribute
                 let final_name = get_serde_rename(&field.attrs).unwrap_or(field_name);
@@ -101,18 +119,23 @@ fn parse_struct(item: &ItemStruct) -> Option<RustStruct> {
                 .enumerate()
                 .map(|(i, field)| StructField {
                     name: format!("field{}", i),
-                    ty: parse_type(&field.ty),
+                    ty: parse_type_with_context(&field.ty, &generic_params),
                 })
                 .collect()
         }
         Fields::Unit => Vec::new(),
     };
 
-    Some(RustStruct { name, fields })
+    Some(RustStruct {
+        name,
+        generics,
+        fields,
+        source_file: source_file.to_path_buf(),
+    })
 }
 
 /// Parse an enum into our RustEnum representation
-fn parse_enum(item: &ItemEnum) -> Option<RustEnum> {
+fn parse_enum(item: &ItemEnum, source_file: &Path) -> Option<RustEnum> {
     let name = item.ident.to_string();
 
     let variants = item
@@ -154,7 +177,11 @@ fn parse_enum(item: &ItemEnum) -> Option<RustEnum> {
         })
         .collect();
 
-    Some(RustEnum { name, variants })
+    Some(RustEnum {
+        name,
+        variants,
+        source_file: source_file.to_path_buf(),
+    })
 }
 
 /// Get the serde rename value from attributes if present

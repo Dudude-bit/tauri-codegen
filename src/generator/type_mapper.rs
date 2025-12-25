@@ -47,6 +47,11 @@ pub fn rust_to_typescript(rust_type: &RustType, ctx: &GeneratorContext) -> Strin
             }
         }
 
+        RustType::Generic(name) => {
+            // Generic type parameters are passed through as-is (T, U, etc.)
+            name.clone()
+        }
+
         RustType::Unit => "void".to_string(),
 
         RustType::Unknown(desc) => {
