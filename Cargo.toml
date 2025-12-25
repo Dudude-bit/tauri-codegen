@@ -1,0 +1,26 @@
+[package]
+name = "tauri-codegen"
+version = "0.1.0"
+edition = "2021"
+description = "CLI tool to generate TypeScript bindings from Tauri commands"
+license = "MIT"
+
+[dependencies]
+# Rust AST parsing
+syn = { version = "2.0", features = ["full", "parsing", "extra-traits"] }
+
+# CLI argument parsing
+clap = { version = "4.4", features = ["derive"] }
+
+# Configuration parsing
+serde = { version = "1.0", features = ["derive"] }
+toml = "0.9.8"
+
+# Directory traversal
+walkdir = "2.4"
+
+# Error handling
+anyhow = "1.0"
+
+# For converting case (snake_case to camelCase)
+convert_case = "0.10.0"
