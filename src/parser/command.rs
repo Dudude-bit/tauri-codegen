@@ -5,7 +5,7 @@ use std::path::Path;
 use syn::{FnArg, GenericArgument, ItemFn, PathArguments, ReturnType, Type};
 
 /// Parse a Rust source file and extract Tauri commands
-pub fn parse_commands(content: &str, _source_file: &Path) -> Result<Vec<TauriCommand>> {
+pub fn parse_commands(content: &str, source_file: &Path) -> Result<Vec<TauriCommand>> {
     let syntax = syn::parse_file(content)?;
     let mut commands = Vec::new();
 
@@ -13,7 +13,7 @@ pub fn parse_commands(content: &str, _source_file: &Path) -> Result<Vec<TauriCom
         match item {
             syn::Item::Fn(ref func) => {
                 if is_tauri_command(func) {
-                    if let Some(cmd) = parse_command_fn(func) {
+                    if let Some(cmd) = parse_command_fn(func, source_file) {
                         commands.push(cmd);
                     }
                 }
@@ -23,7 +23,7 @@ pub fn parse_commands(content: &str, _source_file: &Path) -> Result<Vec<TauriCom
                 for impl_item in &impl_block.items {
                     if let syn::ImplItem::Fn(method) = impl_item {
                         if is_tauri_command_method(method) {
-                            if let Some(cmd) = parse_command_method(method) {
+                            if let Some(cmd) = parse_command_method(method, source_file) {
                                 commands.push(cmd);
                             }
                         }
@@ -36,7 +36,7 @@ pub fn parse_commands(content: &str, _source_file: &Path) -> Result<Vec<TauriCom
                     for mod_item in items {
                         if let syn::Item::Fn(func) = mod_item {
                             if is_tauri_command(func) {
-                                if let Some(cmd) = parse_command_fn(func) {
+                                if let Some(cmd) = parse_command_fn(func, source_file) {
                                     commands.push(cmd);
                                 }
                             }
@@ -79,7 +79,7 @@ fn is_tauri_command_method(method: &syn::ImplItemFn) -> bool {
 }
 
 /// Parse a function into a TauriCommand
-fn parse_command_fn(func: &ItemFn) -> Option<TauriCommand> {
+fn parse_command_fn(func: &ItemFn, source_file: &Path) -> Option<TauriCommand> {
     let name = func.sig.ident.to_string();
 
     let args = func
@@ -95,11 +95,12 @@ fn parse_command_fn(func: &ItemFn) -> Option<TauriCommand> {
         name,
         args,
         return_type,
+        source_file: source_file.to_path_buf(),
     })
 }
 
 /// Parse a method into a TauriCommand
-fn parse_command_method(method: &syn::ImplItemFn) -> Option<TauriCommand> {
+fn parse_command_method(method: &syn::ImplItemFn, source_file: &Path) -> Option<TauriCommand> {
     let name = method.sig.ident.to_string();
 
     let args = method
@@ -115,6 +116,7 @@ fn parse_command_method(method: &syn::ImplItemFn) -> Option<TauriCommand> {
         name,
         args,
         return_type,
+        source_file: source_file.to_path_buf(),
     })
 }
 
