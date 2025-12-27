@@ -13,7 +13,7 @@ use crate::generator::{
 };
 use crate::models::{ParseResult, RustEnum, RustStruct, RustType};
 use crate::parser::{parse_commands, parse_types};
-use crate::resolver::ModuleResolver;
+use crate::resolver::{ModuleResolver, ResolutionResult};
 use crate::scanner::Scanner;
 
 /// Result of type collection with potential conflicts
@@ -234,20 +234,30 @@ impl Pipeline {
                 for field in &s.fields {
                     let nested_names = collect_custom_types_from_rust_type(&field.ty);
                     for t in nested_names {
-                        if let Some(source) = resolver.resolve_type(&t, &type_file) {
-                            if let Some(existing) = resolved_types.get(&t) {
-                                if existing != &source {
-                                    let conflict_list = conflicts
-                                        .entry(t.clone())
-                                        .or_insert_with(|| vec![existing.clone()]);
-                                    if !conflict_list.contains(&source) {
-                                        conflict_list.push(source);
+                        match resolver.resolve_type(&t, &type_file) {
+                             ResolutionResult::Found(source) => {
+                                let simple_name = t.split("::").last().unwrap_or(&t).to_string();
+                                if let Some(existing) = resolved_types.get(&simple_name) {
+                                    if existing != &source {
+                                        let conflict_list = conflicts
+                                            .entry(simple_name.clone())
+                                            .or_insert_with(|| vec![existing.clone()]);
+                                        if !conflict_list.contains(&source) {
+                                            conflict_list.push(source);
+                                        }
                                     }
+                                } else {
+                                    resolved_types.insert(simple_name.clone(), source.clone());
+                                    // We need to look up the definition using the simple name, 
+                                    // but we continue processing using the *resolved* source file 
+                                    // and the simple name which should match the struct definition.
+                                    to_process.push((simple_name, source));
                                 }
-                            } else {
-                                resolved_types.insert(t.clone(), source.clone());
-                                to_process.push((t, source));
                             }
+                            ResolutionResult::Ambiguous(_) => {
+                                eprintln!("Warning: Ambiguous type '{}' used in {}", t, type_file.display());
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -268,20 +278,27 @@ impl Pipeline {
                             .collect(),
                     };
                     for t in nested_names {
-                        if let Some(source) = resolver.resolve_type(&t, &type_file) {
-                            if let Some(existing) = resolved_types.get(&t) {
-                                if existing != &source {
-                                    let conflict_list = conflicts
-                                        .entry(t.clone())
-                                        .or_insert_with(|| vec![existing.clone()]);
-                                    if !conflict_list.contains(&source) {
-                                        conflict_list.push(source);
+                        match resolver.resolve_type(&t, &type_file) {
+                             ResolutionResult::Found(source) => {
+                                let simple_name = t.split("::").last().unwrap_or(&t).to_string();
+                                if let Some(existing) = resolved_types.get(&simple_name) {
+                                    if existing != &source {
+                                        let conflict_list = conflicts
+                                            .entry(simple_name.clone())
+                                            .or_insert_with(|| vec![existing.clone()]);
+                                        if !conflict_list.contains(&source) {
+                                            conflict_list.push(source);
+                                        }
                                     }
+                                } else {
+                                    resolved_types.insert(simple_name.clone(), source.clone());
+                                    to_process.push((simple_name, source));
                                 }
-                            } else {
-                                resolved_types.insert(t.clone(), source.clone());
-                                to_process.push((t, source));
                             }
+                            ResolutionResult::Ambiguous(_) => {
+                                eprintln!("Warning: Ambiguous type '{}' used in {}", t, type_file.display());
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -305,20 +322,27 @@ impl Pipeline {
     ) {
         match ty {
             RustType::Custom(name) => {
-                if let Some(source) = resolver.resolve_type(name, from_file) {
-                    if let Some(existing) = resolved.get(name) {
-                        // Check for conflict: same name, different source file
-                        if existing != &source {
-                            let conflict_list = conflicts
-                                .entry(name.clone())
-                                .or_insert_with(|| vec![existing.clone()]);
-                            if !conflict_list.contains(&source) {
-                                conflict_list.push(source);
+                match resolver.resolve_type(name, from_file) {
+                    ResolutionResult::Found(source) => {
+                        let simple_name = name.split("::").last().unwrap_or(name).to_string();
+                        if let Some(existing) = resolved.get(&simple_name) {
+                            // Check for conflict: same name, different source file
+                            if existing != &source {
+                                let conflict_list = conflicts
+                                    .entry(simple_name.clone())
+                                    .or_insert_with(|| vec![existing.clone()]);
+                                if !conflict_list.contains(&source) {
+                                    conflict_list.push(source);
+                                }
                             }
+                        } else {
+                            resolved.insert(simple_name, source);
                         }
-                    } else {
-                        resolved.insert(name.clone(), source);
                     }
+                     ResolutionResult::Ambiguous(paths) => {
+                         eprintln!("Warning: Ambiguous type '{}' in {}. Found in: {:?}", name, from_file.display(), paths);
+                     }
+                    _ => {}
                 }
             }
             RustType::Vec(inner) => {
@@ -451,17 +475,17 @@ impl Pipeline {
 
 /// Collect custom type names from a RustType (returns a Vec)
 fn collect_custom_types_from_rust_type(ty: &RustType) -> Vec<String> {
-    let mut types = Vec::new();
+    let mut types = HashSet::new();
     collect_custom_types_recursive(ty, &mut types);
-    types
+    let mut result: Vec<String> = types.into_iter().collect();
+    result.sort();
+    result
 }
 
-fn collect_custom_types_recursive(ty: &RustType, types: &mut Vec<String>) {
+fn collect_custom_types_recursive(ty: &RustType, types: &mut HashSet<String>) {
     match ty {
         RustType::Custom(name) => {
-            if !types.contains(name) {
-                types.push(name.clone());
-            }
+             types.insert(name.clone());
         }
         RustType::Vec(inner) => collect_custom_types_recursive(inner, types),
         RustType::Option(inner) => collect_custom_types_recursive(inner, types),
@@ -541,7 +565,7 @@ mod tests {
             RustType::Primitive("i32".to_string()),
         ]);
         let types = collect_custom_types_from_rust_type(&ty);
-        assert_eq!(types, vec!["User", "Item"]);
+        assert_eq!(types, vec!["Item", "User"]);
     }
 
     #[test]

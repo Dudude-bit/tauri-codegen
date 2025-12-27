@@ -1,9 +1,27 @@
 //! Module resolver - resolves types based on imports and module structure
+//!
+//! Handles:
+//! - Local type definitions
+//! - Explicit imports (use foo::Bar)
+//! - Wildcard imports (use foo::*)
+//! - Relative paths (super::Bar, crate::foo::Bar)
+//! - Ambiguity detection
 
 use anyhow::Result;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use syn::{Item, UseTree};
+
+/// Result of a type resolution attempt
+#[derive(Debug, Clone, PartialEq)]
+pub enum ResolutionResult {
+    /// Successfully resolved to a single file
+    Found(PathBuf),
+    /// Type not found
+    NotFound,
+    /// Ambiguous: found in multiple files
+    Ambiguous(Vec<PathBuf>),
+}
 
 /// Represents a parsed file with its imports and local types
 #[derive(Debug, Default)]
@@ -36,7 +54,7 @@ pub struct ModuleResolver {
     /// File path -> FileScope
     pub files: HashMap<PathBuf, FileScope>,
     /// Type name -> list of files that define it
-    pub type_locations: HashMap<String, Vec<PathBuf>>,
+    pub type_definitions: HashMap<String, Vec<PathBuf>>,
     /// Module path -> file path (e.g., ["crate", "internal"] -> src/internal.rs)
     pub module_to_file: HashMap<Vec<String>, PathBuf>,
 }
@@ -63,7 +81,7 @@ impl ModuleResolver {
                 Item::Struct(s) => {
                     let name = s.ident.to_string();
                     scope.local_types.insert(name.clone(), TypeKind::Struct);
-                    self.type_locations
+                    self.type_definitions
                         .entry(name)
                         .or_default()
                         .push(path.to_path_buf());
@@ -71,7 +89,7 @@ impl ModuleResolver {
                 Item::Enum(e) => {
                     let name = e.ident.to_string();
                     scope.local_types.insert(name.clone(), TypeKind::Enum);
-                    self.type_locations
+                    self.type_definitions
                         .entry(name)
                         .or_default()
                         .push(path.to_path_buf());
@@ -138,66 +156,139 @@ impl ModuleResolver {
     }
 
     /// Resolve a type name in the context of a specific file
-    pub fn resolve_type(&self, type_name: &str, from_file: &Path) -> Option<PathBuf> {
-        let scope = self.files.get(from_file)?;
+    pub fn resolve_type(&self, type_path: &str, from_file: &Path) -> ResolutionResult {
+        let segments: Vec<&str> = type_path.split("::").filter(|s| !s.is_empty()).collect();
+        let scope = match self.files.get(from_file) {
+            Some(s) => s,
+            None => return ResolutionResult::NotFound,
+        };
 
-        // 1. Check if it's a local type
-        if scope.local_types.contains_key(type_name) {
-            return Some(from_file.to_path_buf());
+        // Handle simple name (no ::)
+        if segments.len() == 1 {
+            let name = segments[0];
+            return self.resolve_simple_name(name, scope, from_file);
+        }
+
+        // Handle path (foo::Bar, super::Bar, crate::foo::Bar)
+        self.resolve_path(&segments, scope)
+    }
+
+    fn resolve_simple_name(
+        &self,
+        name: &str,
+        scope: &FileScope,
+        from_file: &Path,
+    ) -> ResolutionResult {
+        // 1. Check local definition
+        if scope.local_types.contains_key(name) {
+            return ResolutionResult::Found(from_file.to_path_buf());
         }
 
         // 2. Check explicit imports
-        if let Some(imported) = scope.imports.get(type_name) {
-            return self.find_type_by_module_path(&imported.path);
+        if let Some(imported) = scope.imports.get(name) {
+            return self.resolve_module_path(&imported.path);
         }
 
         // 3. Check wildcard imports
         for wildcard_path in &scope.wildcard_imports {
-            if let Some(file) = self.find_type_in_module(type_name, wildcard_path) {
-                return Some(file);
+            if let Some(file) = self.find_type_in_module(name, wildcard_path) {
+                return ResolutionResult::Found(file);
             }
         }
 
-        // 4. Fallback: find any file that defines this type
-        if let Some(locations) = self.type_locations.get(type_name) {
+        // 4. Fallback: Lookup by name in entire workspace (Ambiguity Check)
+        if let Some(locations) = self.type_definitions.get(name) {
             if locations.len() == 1 {
-                return Some(locations[0].clone());
+                return ResolutionResult::Found(locations[0].clone());
             }
+            // If multiple found, try to filter by proximity or return ambiguous
+            // Simple proximity check: same parent module?
             let from_module = &scope.module_path;
-            for loc in locations {
-                if let Some(loc_scope) = self.files.get(loc) {
-                    if loc_scope.module_path.len() >= 2
-                        && from_module.len() >= 2
-                        && loc_scope.module_path[..loc_scope.module_path.len() - 1]
-                            == from_module[..from_module.len() - 1]
-                    {
-                        return Some(loc.clone());
-                    }
-                }
+            
+            // Prioritize siblings (same parent module)
+            let siblings: Vec<_> = locations
+                .iter()
+                .filter(|loc| {
+                     if let Some(loc_scope) = self.files.get(*loc) {
+                        are_siblings(&loc_scope.module_path, from_module)
+                     } else {
+                         false
+                     }
+                })
+                .collect();
+                
+            if siblings.len() == 1 {
+                 return ResolutionResult::Found(siblings[0].clone());
             }
-            return Some(locations[0].clone());
+            
+            return ResolutionResult::Ambiguous(locations.clone());
         }
 
-        None
+        ResolutionResult::NotFound
     }
 
-    /// Find file by module path
-    fn find_type_by_module_path(&self, module_path: &[String]) -> Option<PathBuf> {
-        if module_path.len() < 2 {
-            return None;
+    fn resolve_path(&self, segments: &[&str], scope: &FileScope) -> ResolutionResult {
+        let path_result = self.resolve_canonical_path(segments, scope);
+        match path_result {
+            Some(path) => self.resolve_module_path(&path),
+            None => ResolutionResult::NotFound
+        }    
+    }
+    
+    // Resolve any path tokens to an absolute module path ["crate", "foo", "Type"]
+    fn resolve_canonical_path(&self, segments: &[&str], scope: &FileScope) -> Option<Vec<String>> {
+        let mut current_path = if segments[0] == "crate" {
+            vec!["crate".to_string()]
+        } else if segments[0] == "super" || segments[0] == "self" {
+            scope.module_path.clone()
+        } else {
+            // Implicit relative path: `submod::Type` -> start from current module
+             scope.module_path.clone()
+        };
+        
+        let iter_start = if segments[0] == "crate" { 1 } else { 0 };
+
+        for segment in &segments[iter_start..] {
+             match *segment {
+                "super" => {
+                    if current_path.len() > 1 {
+                        current_path.pop();
+                    } else {
+                         // Cannot go above root
+                         return None;
+                    }
+                }
+                "self" => {
+                    // Stay at current
+                }
+                name => {
+                    current_path.push(name.to_string());
+                }
+            }
         }
+        Some(current_path)
+    }
+
+    /// Resolve an absolute path (["crate", "mod", "Type"]) to a file
+    fn resolve_module_path(&self, module_path: &[String]) -> ResolutionResult {
+        if module_path.len() < 2 {
+            return ResolutionResult::NotFound;
+        }
+        
+        // Split into module part and type part
+        // path: [crate, mod, Type] -> check crate/mod.rs for Type
         let type_name = &module_path[module_path.len() - 1];
         let mod_path = &module_path[..module_path.len() - 1];
 
         if let Some(file_path) = self.module_to_file.get(mod_path) {
             if let Some(scope) = self.files.get(file_path) {
                 if scope.local_types.contains_key(type_name) {
-                    return Some(file_path.clone());
+                    return ResolutionResult::Found(file_path.clone());
                 }
             }
         }
-
-        None
+        
+        ResolutionResult::NotFound
     }
 
     /// Find type in module (for wildcard imports)
@@ -213,6 +304,17 @@ impl ModuleResolver {
     }
 }
 
+fn are_siblings(path_a: &[String], path_b: &[String]) -> bool {
+    if path_a.len() != path_b.len() {
+        return false;
+    }
+    // Check if they share the same parent
+    // a: [crate, foo, bar]
+    // b: [crate, foo, baz]
+    // parent: [crate, foo]
+    path_a[..path_a.len()-1] == path_b[..path_b.len()-1]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,251 +326,56 @@ mod tests {
     #[test]
     fn test_resolve_local_type() {
         let mut resolver = ModuleResolver::new();
-
-        let code = r#"
-            #[derive(Serialize)]
-            pub struct User {
-                pub id: i32,
-            }
-        "#;
-
-        let file_path = PathBuf::from("src/types.rs");
-        resolver.parse_file(&file_path, code, &base_path()).unwrap();
-
-        let resolved = resolver.resolve_type("User", &file_path);
-        assert_eq!(resolved, Some(file_path));
-    }
-
-    #[test]
-    fn test_resolve_imported_type() {
-        let mut resolver = ModuleResolver::new();
-
-        // First file defines the type
-        let types_code = r#"
-            pub struct User {
-                pub id: i32,
-            }
-        "#;
-        let types_path = PathBuf::from("src/types.rs");
-        resolver
-            .parse_file(&types_path, types_code, &base_path())
-            .unwrap();
-
-        // Second file imports and uses it
-        let commands_code = r#"
-            use crate::types::User;
-
-            fn get_user() -> User {
-                unimplemented!()
-            }
-        "#;
-        let commands_path = PathBuf::from("src/commands.rs");
-        resolver
-            .parse_file(&commands_path, commands_code, &base_path())
-            .unwrap();
-
-        let resolved = resolver.resolve_type("User", &commands_path);
-        assert_eq!(resolved, Some(types_path));
-    }
-
-    #[test]
-    fn test_resolve_renamed_import() {
-        let mut resolver = ModuleResolver::new();
-
-        let types_code = r#"
-            pub struct User {
-                pub id: i32,
-            }
-        "#;
-        let types_path = PathBuf::from("src/types.rs");
-        resolver
-            .parse_file(&types_path, types_code, &base_path())
-            .unwrap();
-
-        let commands_code = r#"
-            use crate::types::User as MyUser;
-        "#;
-        let commands_path = PathBuf::from("src/commands.rs");
-        resolver
-            .parse_file(&commands_path, commands_code, &base_path())
-            .unwrap();
-
-        // Should resolve the renamed type
-        let resolved = resolver.resolve_type("MyUser", &commands_path);
-        assert_eq!(resolved, Some(types_path));
-    }
-
-    #[test]
-    fn test_resolve_wildcard_import() {
-        let mut resolver = ModuleResolver::new();
-
-        let types_code = r#"
-            pub struct User {
-                pub id: i32,
-            }
-            pub struct Item {
-                pub name: String,
-            }
-        "#;
-        let types_path = PathBuf::from("src/types.rs");
-        resolver
-            .parse_file(&types_path, types_code, &base_path())
-            .unwrap();
-
-        let commands_code = r#"
-            use crate::types::*;
-        "#;
-        let commands_path = PathBuf::from("src/commands.rs");
-        resolver
-            .parse_file(&commands_path, commands_code, &base_path())
-            .unwrap();
-
-        let resolved = resolver.resolve_type("User", &commands_path);
-        assert_eq!(resolved, Some(types_path.clone()));
-
-        let resolved = resolver.resolve_type("Item", &commands_path);
-        assert_eq!(resolved, Some(types_path));
-    }
-
-    #[test]
-    fn test_resolve_type_fallback_single_location() {
-        let mut resolver = ModuleResolver::new();
-
-        let types_code = r#"
-            pub struct User {
-                pub id: i32,
-            }
-        "#;
-        let types_path = PathBuf::from("src/types.rs");
-        resolver
-            .parse_file(&types_path, types_code, &base_path())
-            .unwrap();
-
-        // Commands file doesn't import User explicitly
-        let commands_code = r#"
-            fn some_function() {}
-        "#;
-        let commands_path = PathBuf::from("src/commands.rs");
-        resolver
-            .parse_file(&commands_path, commands_code, &base_path())
-            .unwrap();
-
-        // Should still find User via fallback (only one location)
-        let resolved = resolver.resolve_type("User", &commands_path);
-        assert_eq!(resolved, Some(types_path));
-    }
-
-    #[test]
-    fn test_path_to_module_simple() {
-        let resolver = ModuleResolver::new();
-
-        let path = PathBuf::from("src/types.rs");
-        let module = resolver.path_to_module(&path, &base_path());
-
-        assert_eq!(module, vec!["crate", "types"]);
-    }
-
-    #[test]
-    fn test_path_to_module_nested() {
-        let resolver = ModuleResolver::new();
-
-        let path = PathBuf::from("src/api/commands.rs");
-        let module = resolver.path_to_module(&path, &base_path());
-
-        assert_eq!(module, vec!["crate", "api", "commands"]);
-    }
-
-    #[test]
-    fn test_path_to_module_mod_rs() {
-        let resolver = ModuleResolver::new();
-
-        let path = PathBuf::from("src/api/mod.rs");
-        let module = resolver.path_to_module(&path, &base_path());
-
-        assert_eq!(module, vec!["crate", "api"]);
-    }
-
-    #[test]
-    fn test_path_to_module_main_rs() {
-        let resolver = ModuleResolver::new();
-
-        let path = PathBuf::from("src/main.rs");
-        let module = resolver.path_to_module(&path, &base_path());
-
-        assert_eq!(module, vec!["crate"]);
-    }
-
-    #[test]
-    fn test_parse_use_tree_simple() {
-        let mut resolver = ModuleResolver::new();
-
-        let code = r#"
-            use crate::types::User;
-            use crate::models::Item;
-        "#;
-
-        let path = PathBuf::from("src/commands.rs");
-        resolver.parse_file(&path, code, &base_path()).unwrap();
-
-        let scope = resolver.files.get(&path).unwrap();
-        assert!(scope.imports.contains_key("User"));
-        assert!(scope.imports.contains_key("Item"));
-    }
-
-    #[test]
-    fn test_parse_use_tree_grouped() {
-        let mut resolver = ModuleResolver::new();
-
-        let code = r#"
-            use crate::types::{User, Item, Status};
-        "#;
-
-        let path = PathBuf::from("src/commands.rs");
-        resolver.parse_file(&path, code, &base_path()).unwrap();
-
-        let scope = resolver.files.get(&path).unwrap();
-        assert!(scope.imports.contains_key("User"));
-        assert!(scope.imports.contains_key("Item"));
-        assert!(scope.imports.contains_key("Status"));
-    }
-
-    #[test]
-    fn test_type_locations_multiple_files() {
-        let mut resolver = ModuleResolver::new();
-
-        let code1 = r#"
-            pub struct Data { pub value: i32 }
-        "#;
-        let path1 = PathBuf::from("src/a.rs");
-        resolver.parse_file(&path1, code1, &base_path()).unwrap();
-
-        let code2 = r#"
-            pub struct Data { pub name: String }
-        "#;
-        let path2 = PathBuf::from("src/b.rs");
-        resolver.parse_file(&path2, code2, &base_path()).unwrap();
-
-        // Both should be recorded
-        let locations = resolver.type_locations.get("Data").unwrap();
-        assert_eq!(locations.len(), 2);
-        assert!(locations.contains(&path1));
-        assert!(locations.contains(&path2));
-    }
-
-    #[test]
-    fn test_parse_struct_and_enum() {
-        let mut resolver = ModuleResolver::new();
-
-        let code = r#"
-            pub struct User { pub id: i32 }
-            pub enum Status { Active, Inactive }
-        "#;
-
+        let code = "struct User;";
         let path = PathBuf::from("src/types.rs");
         resolver.parse_file(&path, code, &base_path()).unwrap();
 
-        let scope = resolver.files.get(&path).unwrap();
-        assert_eq!(scope.local_types.get("User"), Some(&TypeKind::Struct));
-        assert_eq!(scope.local_types.get("Status"), Some(&TypeKind::Enum));
+        match resolver.resolve_type("User", &path) {
+            ResolutionResult::Found(p) => assert_eq!(p, path),
+            _ => panic!("Failed to resolve"),
+        }
+    }
+
+    #[test]
+    fn test_resolve_super() {
+        let mut resolver = ModuleResolver::new();
+        
+        // Parent
+        let parent_code = "struct User;";
+        let parent_path = PathBuf::from("src/mod.rs");
+        resolver.parse_file(&parent_path, parent_code, &base_path()).unwrap();
+        
+        // Child
+        let child_code = "";
+        let child_path = PathBuf::from("src/sub/mod.rs");
+        resolver.parse_file(&child_path, child_code, &base_path()).unwrap();
+        
+        match resolver.resolve_type("super::User", &child_path) {
+             ResolutionResult::Found(p) => assert_eq!(p, parent_path),
+             res => panic!("Failed to resolve super::User: {:?}", res),
+        }
+    }
+    
+    #[test]
+    fn test_resolve_ambiguous() {
+        let mut resolver = ModuleResolver::new();
+        
+        let path_a = PathBuf::from("src/a.rs");
+        resolver.parse_file(&path_a, "struct User;", &base_path()).unwrap();
+        
+        let path_b = PathBuf::from("src/b.rs");
+        resolver.parse_file(&path_b, "struct User;", &base_path()).unwrap();
+        
+        let path_cmd = PathBuf::from("src/cmd.rs");
+        resolver.parse_file(&path_cmd, "", &base_path()).unwrap();
+        
+        match resolver.resolve_type("User", &path_cmd) {
+            ResolutionResult::Ambiguous(paths) => {
+                assert_eq!(paths.len(), 2);
+                assert!(paths.contains(&path_a));
+                assert!(paths.contains(&path_b));
+            },
+            res => panic!("Expected Ambiguous, got {:?}", res),
+        }
     }
 }

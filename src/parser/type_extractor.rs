@@ -90,7 +90,17 @@ pub fn parse_type_with_context(ty: &Type, generic_params: &HashSet<String>) -> R
                     }
 
                     // Custom types (not a known generic param)
-                    _ => RustType::Custom(name),
+                    _ => {
+                        // Reconstruct full path for custom types
+                        let full_name = type_path
+                            .path
+                            .segments
+                            .iter()
+                            .map(|s| s.ident.to_string())
+                            .collect::<Vec<_>>()
+                            .join("::");
+                        RustType::Custom(full_name)
+                    }
                 }
             } else {
                 RustType::Unknown("unknown path".to_string())
