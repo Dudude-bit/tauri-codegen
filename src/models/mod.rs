@@ -1,3 +1,5 @@
+//! Data models for representing Tauri commands and Rust types.
+
 mod command;
 mod parse_result;
 mod rust_type;

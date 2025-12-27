@@ -3,13 +3,13 @@
 pub enum RustType {
     /// Primitive types (String, i32, bool, etc.)
     Primitive(String),
-    /// Vec<T>
+    /// `Vec<T>`
     Vec(Box<RustType>),
-    /// Option<T>
+    /// `Option<T>`
     Option(Box<RustType>),
-    /// Result<T, E> - only Ok type is used for TypeScript generation
+    /// `Result<T, E>` - only Ok type is used for TypeScript generation
     Result(Box<RustType>),
-    /// HashMap<K, V>
+    /// `HashMap<K, V>`
     HashMap {
         key: Box<RustType>,
         value: Box<RustType>,

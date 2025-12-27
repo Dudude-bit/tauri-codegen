@@ -3,7 +3,20 @@ name = "tauri-codegen"
 version = "0.1.0"
 edition = "2021"
 description = "CLI tool to generate TypeScript bindings from Tauri commands"
+authors = ["kirillinakin <kirillinyakin@yandex.ru>"]
+repository = "https://github.com/Dudude-bit/tauri-codegen"
 license = "MIT"
+readme = "README.md"
+keywords = ["tauri", "typescript", "codegen", "bindings", "api"]
+categories = ["development-tools", "command-line-utilities", "web-programming"]
+exclude = [
+    "test-project",
+    "tests",
+    "mise.toml",
+    ".gitignore",
+    ".github",
+    ".idea"
+]
 
 [lib]
 name = "tauri_codegen"
