@@ -1,42 +1,42 @@
 # tauri-ts-generator
 
-CLI инструмент для автоматической генерации TypeScript биндингов из Tauri команд.
+CLI tool to automatically generate TypeScript bindings from Tauri commands.
 
-## Описание
+## Description
 
-`tauri-ts-generator` сканирует ваш Rust код, находит все функции с макросом `#[tauri::command]` и автоматически генерирует:
+`tauri-ts-generator` scans your Rust code, finds all functions with the `#[tauri::command]` macro, and automatically generates:
 
-- **TypeScript интерфейсы** для Rust структур и перечислений
-- **TypeScript функции-обёртки** для вызова Tauri команд через `invoke()`
+- **TypeScript interfaces** for Rust structs and enums
+- **TypeScript wrapper functions** to invoke Tauri commands via `invoke()`
 
-Это обеспечивает type-safe взаимодействие между TypeScript frontend и Rust backend, минимизируя ручное написание повторяющегося кода.
+This ensures type-safe interaction between the TypeScript frontend and Rust backend, minimizing manual boilerplate.
 
-## Установка
+## Installation
 
 ```bash
 cargo install --path .
 ```
 
-Или сборка из исходников:
+Or build from source:
 
 ```bash
 cargo build --release
 ```
 
-## Быстрый старт
+## Quick Start
 
-### 1. Инициализация конфигурации
+### 1. Initialize Configuration
 
 ```bash
 cd your-tauri-project
 tauri-ts-generator init
 ```
 
-Это создаст файл `tauri-codegen.toml` с настройками по умолчанию.
+This will create a `tauri-codegen.toml` file with default settings.
 
-### 2. Настройка конфигурации
+### 2. Configure Settings
 
-Отредактируйте `tauri-codegen.toml`:
+Edit `tauri-codegen.toml`:
 
 ```toml
 [input]
@@ -54,21 +54,21 @@ function_prefix = ""
 function_suffix = ""
 ```
 
-### 3. Генерация TypeScript кода
+### 3. Generate TypeScript Code
 
 ```bash
 tauri-ts-generator generate
 ```
 
-Или с подробным выводом:
+Or with verbose output:
 
 ```bash
 tauri-ts-generator generate --verbose
 ```
 
-## Пример
+## Example
 
-### Rust код (вход)
+### Rust Code (Input)
 
 ```rust
 use serde::{Deserialize, Serialize};
@@ -103,7 +103,7 @@ pub fn greet(name: String) -> String {
 }
 ```
 
-### TypeScript код (выход)
+### TypeScript Code (Output)
 
 **types.ts:**
 
@@ -142,9 +142,9 @@ export async function greet(name: string): Promise<string> {
 }
 ```
 
-## Маппинг типов
+## Type Mapping
 
-### Базовые типы
+### Basic Types
 
 | Rust | TypeScript |
 |------|------------|
@@ -160,64 +160,64 @@ export async function greet(name: string): Promise<string> {
 | Custom struct | TypeScript interface |
 | Simple enum | String union type |
 
-### Внешние типы (crates)
+### External Types (Crates)
 
-| Rust | TypeScript | Описание |
-|------|------------|----------|
-| `chrono::DateTime<Tz>` | `string` | ISO 8601 формат |
-| `chrono::NaiveDateTime` | `string` | ISO 8601 формат |
+| Rust | TypeScript | Description |
+|------|------------|-------------|
+| `chrono::DateTime<Tz>` | `string` | ISO 8601 format |
+| `chrono::NaiveDateTime` | `string` | ISO 8601 format |
 | `chrono::NaiveDate` | `string` | YYYY-MM-DD |
 | `chrono::NaiveTime` | `string` | HH:MM:SS |
-| `time::OffsetDateTime` | `string` | ISO 8601 формат |
-| `time::PrimitiveDateTime` | `string` | ISO 8601 формат |
-| `uuid::Uuid` | `string` | UUID строка |
-| `rust_decimal::Decimal` | `string` | Числовая строка |
-| `std::path::PathBuf` | `string` | Путь к файлу |
-| `url::Url` | `string` | URL строка |
-| `std::net::IpAddr` | `string` | IP адрес |
-| `std::time::Duration` | `number` | Секунды |
-| `serde_json::Value` | `unknown` | Любой JSON |
-| `bytes::Bytes` | `number[]` | Массив байт |
+| `time::OffsetDateTime` | `string` | ISO 8601 format |
+| `time::PrimitiveDateTime` | `string` | ISO 8601 format |
+| `uuid::Uuid` | `string` | UUID string |
+| `rust_decimal::Decimal` | `string` | Numeric string |
+| `std::path::PathBuf` | `string` | File path |
+| `url::Url` | `string` | URL string |
+| `std::net::IpAddr` | `string` | IP address |
+| `std::time::Duration` | `number` | Seconds |
+| `serde_json::Value` | `unknown` | Any JSON |
+| `bytes::Bytes` | `number[]` | Byte array |
 | Complex enum | Discriminated union |
 
-## Конфигурация
+## Configuration
 
 ### `[input]`
 
-| Параметр | Описание | По умолчанию |
-|----------|----------|--------------|
-| `source_dir` | Директория с Rust исходниками | `src-tauri/src` |
-| `exclude` | Список директорий/файлов для исключения | `["tests", "target"]` |
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `source_dir` | Directory with Rust source files | `src-tauri/src` |
+| `exclude` | List of directories/files to exclude | `["tests", "target"]` |
 
 ### `[output]`
 
-| Параметр | Описание | По умолчанию |
-|----------|----------|--------------|
-| `types_file` | Путь для генерации TypeScript типов | `src/generated/types.ts` |
-| `commands_file` | Путь для генерации TypeScript команд | `src/generated/commands.ts` |
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `types_file` | Path to generate TypeScript types | `src/generated/types.ts` |
+| `commands_file` | Path to generate TypeScript commands | `src/generated/commands.ts` |
 
 ### `[naming]`
 
-| Параметр | Описание | По умолчанию |
-|----------|----------|--------------|
-| `type_prefix` | Префикс для имён типов | `""` |
-| `type_suffix` | Суффикс для имён типов | `""` |
-| `function_prefix` | Префикс для имён функций | `""` |
-| `function_suffix` | Суффикс для имён функций | `""` |
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `type_prefix` | Prefix for type names | `""` |
+| `type_suffix` | Suffix for type names | `""` |
+| `function_prefix` | Prefix for function names | `""` |
+| `function_suffix` | Suffix for function names | `""` |
 
-## CLI команды
+## CLI Commands
 
 ```bash
 tauri-ts-generator <COMMAND>
 
 Commands:
-  generate  Генерация TypeScript биндингов
-  init      Создание файла конфигурации
-  help      Справка
+  generate  Generate TypeScript bindings
+  init      Create configuration file
+  help      Print this message or the help of the given subcommand(s)
 
 Options:
-  -h, --help     Справка
-  -V, --version  Версия
+  -h, --help     Print help
+  -V, --version  Print version
 ```
 
 ### generate
@@ -226,9 +226,9 @@ Options:
 tauri-ts-generator generate [OPTIONS]
 
 Options:
-  -c, --config <FILE>  Путь к файлу конфигурации [default: tauri-codegen.toml]
-  -v, --verbose        Подробный вывод
-  -h, --help           Справка
+  -c, --config <FILE>  Path to config file [default: tauri-codegen.toml]
+  -v, --verbose        Verbose output
+  -h, --help           Print help
 ```
 
 ### init
@@ -237,21 +237,21 @@ Options:
 tauri-ts-generator init [OPTIONS]
 
 Options:
-  -o, --output <FILE>  Путь для создания конфигурации [default: tauri-codegen.toml]
-  -f, --force          Перезаписать существующий файл
-  -h, --help           Справка
+  -o, --output <FILE>  Path to create config file [default: tauri-codegen.toml]
+  -f, --force          Overwrite existing file
+  -h, --help           Print help
 ```
 
-## Особенности
+## Features
 
-- **Автоматический парсинг** — использует `syn` для анализа Rust AST
-- **Поддержка async функций** — корректно обрабатывает async/await
-- **Пользовательские типы** — парсит struct и enum с атрибутами `#[derive(Serialize)]`
-- **serde rename** — учитывает `#[serde(rename = "...")]`
-- **Специальные типы Tauri** — автоматически пропускает `State`, `Window`, `AppHandle`
-- **Вложенные модули** — сканирует команды внутри `mod` блоков
+- **Automated Parsing** — uses `syn` to analyze Rust AST
+- **Async Support** — correctly handles `async` commands
+- **Custom Types** — parses structs and enums with `#[derive(Serialize)]` attributes
+- **Serde Rename** — respects `#[serde(rename = "...")]`
+- **Tauri Special Types** — automatically skips `State`, `Window`, `AppHandle`
+- **Nested Modules** — scans commands inside `mod` blocks
 
-## Лицензия
+## License
 
 MIT
 

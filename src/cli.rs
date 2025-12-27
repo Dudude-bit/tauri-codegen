@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 /// CLI tool to generate TypeScript bindings from Tauri commands
 #[derive(Parser, Debug)]
-#[command(name = "tauri-codegen")]
+#[command(name = "tauri-ts-generator")]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
