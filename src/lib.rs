@@ -1,4 +1,4 @@
-//! # tauri-codegen
+//! # tauri-ts-generator
 //!
 //! A CLI tool and library for generating TypeScript bindings from Tauri commands.
 //!
@@ -21,13 +21,13 @@
 //! Although primarily used as a CLI tool, you can also use it as a library:
 //!
 //! ```rust,no_run
-//! use tauri_codegen::config::Config;
-//! use tauri_codegen::pipeline::Pipeline;
+//! use tauri_ts_generator::config::Config;
+//! use tauri_ts_generator::pipeline::Pipeline;
 //!
 //! fn main() -> anyhow::Result<()> {
 //!     let config = Config::default_config();
-//!     let pipeline = Pipeline::new(config);
-//!     pipeline.run()?;
+//!     let pipeline = Pipeline::new(false);
+//!     pipeline.run(&config)?;
 //!     Ok(())
 //! }
 //! ```

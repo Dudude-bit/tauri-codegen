@@ -3,8 +3,8 @@
 use std::fs;
 use std::path::PathBuf;
 use tempfile::tempdir;
-use tauri_codegen::config::{Config, InputConfig, NamingConfig, OutputConfig};
-use tauri_codegen::pipeline::Pipeline;
+use tauri_ts_generator::config::{Config, InputConfig, NamingConfig, OutputConfig};
+use tauri_ts_generator::pipeline::Pipeline;
 
 /// Create a test config with temp directories
 fn create_test_config(source_dir: PathBuf, output_dir: PathBuf) -> Config {

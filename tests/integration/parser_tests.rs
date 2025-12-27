@@ -1,8 +1,8 @@
 //! Integration tests for parsing Rust source files
 
 use std::path::PathBuf;
-use tauri_codegen::parser::{parse_commands, parse_types};
-use tauri_codegen::models::RustType;
+use tauri_ts_generator::parser::{parse_commands, parse_types};
+use tauri_ts_generator::models::RustType;
 
 /// Get path to test fixtures
 fn fixture_path(name: &str) -> PathBuf {

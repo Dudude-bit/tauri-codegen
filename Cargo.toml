@@ -1,5 +1,5 @@
 [package]
-name = "tauri-codegen"
+name = "tauri-ts-generator"
 version = "1.0.0"
 edition = "2021"
 description = "CLI tool to generate TypeScript bindings from Tauri commands"
@@ -19,11 +19,11 @@ exclude = [
 ]
 
 [lib]
-name = "tauri_codegen"
+name = "tauri_ts_generator"
 path = "src/lib.rs"
 
 [[bin]]
-name = "tauri-codegen"
+name = "tauri-ts-generator"
 path = "src/main.rs"
 
 [[test]]

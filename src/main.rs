@@ -1,7 +1,7 @@
 use anyhow::Result;
-use tauri_codegen::cli::{Cli, Commands};
-use tauri_codegen::config::Config;
-use tauri_codegen::pipeline::Pipeline;
+use tauri_ts_generator::cli::{Cli, Commands};
+use tauri_ts_generator::config::Config;
+use tauri_ts_generator::pipeline::Pipeline;
 
 fn main() -> Result<()> {
     let cli = Cli::parse_args();
