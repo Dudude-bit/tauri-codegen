@@ -191,7 +191,9 @@ impl ModuleResolver {
 
         // 3. Check wildcard imports
         for wildcard_path in &scope.wildcard_imports {
-            if let Some(file) = self.find_type_in_module(name, wildcard_path) {
+            // Normalize relative path to absolute path
+            let full_path = self.normalize_relative_path(wildcard_path, &scope.module_path);
+            if let Some(file) = self.find_type_in_module(name, &full_path) {
                 return ResolutionResult::Found(file);
             }
         }
@@ -295,13 +297,62 @@ impl ModuleResolver {
 
         if let Some(file_path) = self.module_to_file.get(mod_path) {
             if let Some(scope) = self.files.get(file_path) {
+                // 1. Check local definition
                 if scope.local_types.contains_key(type_name) {
                     return ResolutionResult::Found(file_path.clone());
+                }
+                
+                // 2. Check re-exports (imports via pub use or use)
+                if let Some(imported) = scope.imports.get(type_name) {
+                     // Recursively resolve the imported path relative to THIS module
+                     let segments: Vec<&str> = imported.path.iter().map(|s| s.as_str()).collect();
+                     return self.resolve_path(&segments, scope);
+                }
+                
+                // 3. Check wildcard re-exports (pub use submod::*)
+                for wildcard_path in &scope.wildcard_imports {
+                    // Normalize relative path to absolute path
+                    let full_path = self.normalize_relative_path(wildcard_path, &scope.module_path);
+                    if let Some(found_file) = self.find_type_in_module(type_name, &full_path) {
+                        return ResolutionResult::Found(found_file);
+                    }
                 }
             }
         }
         
         ResolutionResult::NotFound
+    }
+    
+    /// Normalize a relative module path to an absolute path
+    /// e.g., ["types"] with context ["crate", "resources"] -> ["crate", "resources", "types"]
+    fn normalize_relative_path(&self, relative_path: &[String], from_module: &[String]) -> Vec<String> {
+        if relative_path.is_empty() {
+            return from_module.to_vec();
+        }
+        
+        // If path starts with "crate", it's already absolute
+        if relative_path.first().map(|s| s.as_str()) == Some("crate") {
+            return relative_path.to_vec();
+        }
+        
+        // Handle super:: and self:: in relative paths
+        let mut result = from_module.to_vec();
+        for segment in relative_path {
+            match segment.as_str() {
+                "super" => {
+                    if result.len() > 1 {
+                        result.pop();
+                    }
+                }
+                "self" => {
+                    // Stay at current module
+                }
+                name => {
+                    result.push(name.to_string());
+                }
+            }
+        }
+        result
     }
 
     /// Find type in module (for wildcard imports)
@@ -487,6 +538,174 @@ mod tests {
         match resolver.resolve_type("super::sibling::SiblingType", &current_path) {
              ResolutionResult::Found(p) => assert_eq!(p, sibling_path),
              res => panic!("Failed to resolve sibling path via super: {:?}", res),
+        }
+    }
+    #[test]
+    fn test_resolve_reexport() {
+        let mut resolver = ModuleResolver::new();
+
+        // src/types.rs -> struct User
+        let types_path = PathBuf::from("src/types.rs");
+        resolver.parse_file(&types_path, "pub struct User;", &base_path()).unwrap();
+
+        // src/lib.rs -> pub mod types; pub use types::User;
+        let lib_path = PathBuf::from("src/lib.rs");
+        let lib_code = "pub mod types; pub use types::User;";
+        resolver.parse_file(&lib_path, lib_code, &base_path()).unwrap();
+
+        if let Some(scope) = resolver.files.get(&lib_path) {
+            eprintln!("Lib imports: {:?}", scope.imports);
+        }
+
+        // src/cmd.rs -> use crate::User;
+        let main_path = PathBuf::from("src/cmd.rs");
+        let main_code = "use crate::User;";
+        resolver.parse_file(&main_path, main_code, &base_path()).unwrap();
+
+        // Should resolve crate::User to src/types.rs
+        match resolver.resolve_type("crate::User", &main_path) {
+            ResolutionResult::Found(p) => assert_eq!(p, types_path),
+            res => panic!("Failed to resolve re-export: {:?}", res),
+        }
+    }
+
+    #[test]
+    fn test_resolve_type_via_wildcard_reexport() {
+        let mut resolver = ModuleResolver::new();
+
+        // src/resources/types.rs -> struct PodInfo
+        let types_path = PathBuf::from("src/resources/types.rs");
+        resolver.parse_file(&types_path, "pub struct PodInfo;", &base_path()).unwrap();
+
+        // src/resources/mod.rs -> pub use types::*;
+        let mod_path = PathBuf::from("src/resources/mod.rs");
+        let mod_code = "pub use types::*;";
+        resolver.parse_file(&mod_path, mod_code, &base_path()).unwrap();
+
+        // src/commands.rs -> use crate::resources::PodInfo;
+        let cmd_path = PathBuf::from("src/commands.rs");
+        let cmd_code = "use crate::resources::PodInfo;";
+        resolver.parse_file(&cmd_path, cmd_code, &base_path()).unwrap();
+
+        // Should resolve crate::resources::PodInfo via wildcard re-export to src/resources/types.rs
+        match resolver.resolve_type("crate::resources::PodInfo", &cmd_path) {
+            ResolutionResult::Found(p) => assert_eq!(p, types_path),
+            res => panic!("Failed to resolve via wildcard re-export: {:?}", res),
+        }
+    }
+
+    #[test]
+    fn test_resolve_simple_name_via_wildcard() {
+        let mut resolver = ModuleResolver::new();
+
+        // src/types.rs -> struct User
+        let types_path = PathBuf::from("src/types.rs");
+        resolver.parse_file(&types_path, "pub struct User;", &base_path()).unwrap();
+
+        // src/main.rs -> use types::*;
+        let main_path = PathBuf::from("src/main.rs");
+        let main_code = "use types::*;";
+        resolver.parse_file(&main_path, main_code, &base_path()).unwrap();
+
+        // Should resolve User via wildcard import
+        match resolver.resolve_type("User", &main_path) {
+            ResolutionResult::Found(p) => assert_eq!(p, types_path),
+            res => panic!("Failed to resolve simple name via wildcard: {:?}", res),
+        }
+    }
+
+    #[test]
+    fn test_normalize_relative_path_simple() {
+        let resolver = ModuleResolver::new();
+
+        // ["types"] with context ["crate", "resources"] -> ["crate", "resources", "types"]
+        let relative = vec!["types".to_string()];
+        let from_module = vec!["crate".to_string(), "resources".to_string()];
+        let result = resolver.normalize_relative_path(&relative, &from_module);
+        
+        assert_eq!(result, vec!["crate", "resources", "types"]);
+    }
+
+    #[test]
+    fn test_normalize_relative_path_with_super() {
+        let resolver = ModuleResolver::new();
+
+        // ["super", "other"] with context ["crate", "foo", "bar"] -> ["crate", "foo", "other"]
+        let relative = vec!["super".to_string(), "other".to_string()];
+        let from_module = vec!["crate".to_string(), "foo".to_string(), "bar".to_string()];
+        let result = resolver.normalize_relative_path(&relative, &from_module);
+        
+        assert_eq!(result, vec!["crate", "foo", "other"]);
+    }
+
+    #[test]
+    fn test_normalize_absolute_path() {
+        let resolver = ModuleResolver::new();
+
+        // ["crate", "types"] is already absolute, should not change
+        let absolute = vec!["crate".to_string(), "types".to_string()];
+        let from_module = vec!["crate".to_string(), "other".to_string()];
+        let result = resolver.normalize_relative_path(&absolute, &from_module);
+        
+        assert_eq!(result, vec!["crate", "types"]);
+    }
+
+    #[test]
+    fn test_resolve_through_multiple_wildcards() {
+        let mut resolver = ModuleResolver::new();
+
+        // src/inner/types.rs -> struct DeepType
+        let deep_types_path = PathBuf::from("src/inner/types.rs");
+        resolver.parse_file(&deep_types_path, "pub struct DeepType;", &base_path()).unwrap();
+
+        // src/inner/mod.rs -> pub use types::*;
+        let inner_mod_path = PathBuf::from("src/inner/mod.rs");
+        resolver.parse_file(&inner_mod_path, "pub use types::*;", &base_path()).unwrap();
+
+        // src/lib.rs -> pub use inner::*;
+        let lib_path = PathBuf::from("src/lib.rs");
+        resolver.parse_file(&lib_path, "pub use inner::*;", &base_path()).unwrap();
+
+        // Should resolve crate::inner::DeepType via wildcard in inner/mod.rs
+        let cmd_path = PathBuf::from("src/cmd.rs");
+        resolver.parse_file(&cmd_path, "", &base_path()).unwrap();
+
+        match resolver.resolve_type("crate::inner::DeepType", &cmd_path) {
+            ResolutionResult::Found(p) => assert_eq!(p, deep_types_path),
+            res => panic!("Failed to resolve through nested wildcard: {:?}", res),
+        }
+    }
+
+    #[test]
+    fn test_resolve_mixed_explicit_and_wildcard() {
+        let mut resolver = ModuleResolver::new();
+
+        // src/a.rs -> struct TypeA
+        let a_path = PathBuf::from("src/a.rs");
+        resolver.parse_file(&a_path, "pub struct TypeA;", &base_path()).unwrap();
+
+        // src/b.rs -> struct TypeB
+        let b_path = PathBuf::from("src/b.rs");
+        resolver.parse_file(&b_path, "pub struct TypeB;", &base_path()).unwrap();
+
+        // src/lib.rs -> pub use a::TypeA; pub use b::*;
+        let lib_path = PathBuf::from("src/lib.rs");
+        let lib_code = "pub use a::TypeA; pub use b::*;";
+        resolver.parse_file(&lib_path, lib_code, &base_path()).unwrap();
+
+        let cmd_path = PathBuf::from("src/cmd.rs");
+        resolver.parse_file(&cmd_path, "", &base_path()).unwrap();
+
+        // Resolve explicit re-export
+        match resolver.resolve_type("crate::TypeA", &cmd_path) {
+            ResolutionResult::Found(p) => assert_eq!(p, a_path),
+            res => panic!("Failed to resolve explicit re-export: {:?}", res),
+        }
+
+        // Resolve wildcard re-export
+        match resolver.resolve_type("crate::TypeB", &cmd_path) {
+            ResolutionResult::Found(p) => assert_eq!(p, b_path),
+            res => panic!("Failed to resolve wildcard re-export: {:?}", res),
         }
     }
 }
