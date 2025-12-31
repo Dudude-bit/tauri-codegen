@@ -54,29 +54,53 @@ pub fn parse_commands(content: &str, source_file: &Path) -> Result<Vec<TauriComm
 
 /// Check if a function has the #[tauri::command] attribute
 fn is_tauri_command(func: &ItemFn) -> bool {
-    func.attrs.iter().any(|attr| {
-        if let syn::Meta::Path(path) = &attr.meta {
-            let segments: Vec<_> = path.segments.iter().map(|s| s.ident.to_string()).collect();
-            // Check for #[tauri::command] or #[command]
-            (segments.len() == 2 && segments[0] == "tauri" && segments[1] == "command")
-                || (segments.len() == 1 && segments[0] == "command")
-        } else {
-            false
-        }
-    })
+    func.attrs.iter().any(is_tauri_command_attr)
+}
+
+/// Check if an attribute is #[tauri::command] or #[command] (with or without arguments)
+fn is_tauri_command_attr(attr: &syn::Attribute) -> bool {
+    let path = match &attr.meta {
+        syn::Meta::Path(path) => path,
+        syn::Meta::List(list) => &list.path,
+        _ => return false,
+    };
+    
+    let segments: Vec<_> = path.segments.iter().map(|s| s.ident.to_string()).collect();
+    // Check for #[tauri::command] or #[command]
+    (segments.len() == 2 && segments[0] == "tauri" && segments[1] == "command")
+        || (segments.len() == 1 && segments[0] == "command")
 }
 
 /// Check if a method has the #[tauri::command] attribute
 fn is_tauri_command_method(method: &syn::ImplItemFn) -> bool {
-    method.attrs.iter().any(|attr| {
-        if let syn::Meta::Path(path) = &attr.meta {
-            let segments: Vec<_> = path.segments.iter().map(|s| s.ident.to_string()).collect();
-            (segments.len() == 2 && segments[0] == "tauri" && segments[1] == "command")
-                || (segments.len() == 1 && segments[0] == "command")
-        } else {
-            false
+    method.attrs.iter().any(is_tauri_command_attr)
+}
+
+/// Extract rename_all value from #[tauri::command(rename_all = "...")]
+fn extract_rename_all(attrs: &[syn::Attribute]) -> Option<String> {
+    for attr in attrs {
+        if !is_tauri_command_attr(attr) {
+            continue;
         }
-    })
+        
+        if let syn::Meta::List(list) = &attr.meta {
+            // Parse the tokens inside the parentheses
+            let tokens = list.tokens.clone();
+            if let Ok(nested) = syn::parse2::<syn::ExprAssign>(tokens.clone()) {
+                // Check for rename_all = "value"
+                if let syn::Expr::Path(path) = nested.left.as_ref() {
+                    if path.path.is_ident("rename_all") {
+                        if let syn::Expr::Lit(lit) = nested.right.as_ref() {
+                            if let syn::Lit::Str(lit_str) = &lit.lit {
+                                return Some(lit_str.value());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// Parse a function into a TauriCommand
@@ -91,12 +115,14 @@ fn parse_command_fn(func: &ItemFn, source_file: &Path) -> Option<TauriCommand> {
         .collect();
 
     let return_type = parse_return_type(&func.sig.output);
+    let rename_all = extract_rename_all(&func.attrs);
 
     Some(TauriCommand {
         name,
         args,
         return_type,
         source_file: source_file.to_path_buf(),
+        rename_all,
     })
 }
 
@@ -112,12 +138,14 @@ fn parse_command_method(method: &syn::ImplItemFn, source_file: &Path) -> Option<
         .collect();
 
     let return_type = parse_return_type(&method.sig.output);
+    let rename_all = extract_rename_all(&method.attrs);
 
     Some(TauriCommand {
         name,
         args,
         return_type,
         source_file: source_file.to_path_buf(),
+        rename_all,
     })
 }
 
@@ -426,6 +454,54 @@ mod tests {
         let commands = parse_commands(code, &path).unwrap();
         assert_eq!(commands.len(), 1);
         assert_eq!(commands[0].source_file, path);
+    }
+
+    #[test]
+    fn test_parse_rename_all_snake_case() {
+        let code = r#"
+            #[tauri::command(rename_all = "snake_case")]
+            fn my_command(user_id: i32) {}
+        "#;
+
+        let commands = parse_commands(code, &test_path()).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].rename_all, Some("snake_case".to_string()));
+    }
+
+    #[test]
+    fn test_parse_rename_all_camel_case() {
+        let code = r#"
+            #[tauri::command(rename_all = "camelCase")]
+            fn my_command(user_id: i32) {}
+        "#;
+
+        let commands = parse_commands(code, &test_path()).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].rename_all, Some("camelCase".to_string()));
+    }
+
+    #[test]
+    fn test_parse_no_rename_all() {
+        let code = r#"
+            #[tauri::command]
+            fn my_command(user_id: i32) {}
+        "#;
+
+        let commands = parse_commands(code, &test_path()).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].rename_all, None);
+    }
+
+    #[test]
+    fn test_parse_command_short_form_with_rename_all() {
+        let code = r#"
+            #[command(rename_all = "snake_case")]
+            fn my_command(user_id: i32) {}
+        "#;
+
+        let commands = parse_commands(code, &test_path()).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].rename_all, Some("snake_case".to_string()));
     }
 }
 

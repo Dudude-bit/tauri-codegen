@@ -13,6 +13,9 @@ pub struct TauriCommand {
     pub return_type: Option<RustType>,
     /// Source file where the command was found
     pub source_file: PathBuf,
+    /// Value of rename_all attribute from #[tauri::command(rename_all = "...")]
+    /// Defaults to "camelCase" behavior when None
+    pub rename_all: Option<String>,
 }
 
 /// Represents a function argument

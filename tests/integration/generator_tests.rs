@@ -200,6 +200,7 @@ fn test_generate_command_with_function_prefix_suffix() {
         args: vec![],
         return_type: Some(RustType::Custom("User".to_string())),
         source_file: PathBuf::from("test.rs"),
+        rename_all: None,
     }];
 
     let mut ctx = GeneratorContext::new(NamingConfig {
@@ -226,6 +227,7 @@ fn test_type_imports_in_commands_file() {
             args: vec![],
             return_type: Some(RustType::Custom("User".to_string())),
             source_file: PathBuf::from("test.rs"),
+            rename_all: None,
         },
         TauriCommand {
             name: "create_item".to_string(),
@@ -235,6 +237,7 @@ fn test_type_imports_in_commands_file() {
             }],
             return_type: None,
             source_file: PathBuf::from("test.rs"),
+            rename_all: None,
         },
     ];
 

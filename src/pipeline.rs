@@ -920,12 +920,14 @@ mod tests {
                     args: vec![],
                     return_type: Some(RustType::Custom("User".to_string())),
                     source_file: PathBuf::from("src/a.rs"),
+                    rename_all: None,
                 },
                 TauriCommand {
                     name: "get_user_b".to_string(),
                     args: vec![],
                     return_type: Some(RustType::Custom("User".to_string())),
                     source_file: PathBuf::from("src/b.rs"),
+                    rename_all: None,
                 },
             ],
             structs: vec![
@@ -979,6 +981,7 @@ mod tests {
                 args: vec![],
                 return_type: Some(RustType::Custom("User".to_string())),
                 source_file: PathBuf::from("src/types.rs"),
+                rename_all: None,
             }],
             structs: vec![RustStruct {
                 name: "User".to_string(),
@@ -1030,6 +1033,7 @@ mod tests {
                 }],
                 return_type: Some(RustType::Custom("Response".to_string())),
                 source_file: PathBuf::from("src/types.rs"),
+                rename_all: None,
             }],
             structs: vec![
                 RustStruct {

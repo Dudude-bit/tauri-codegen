@@ -637,7 +637,7 @@ mod tests {
         resolver.parse_file(&lib_path, lib_code, &base_path()).unwrap();
 
         // Verify lib_path was parsed correctly
-        assert!(resolver.files.get(&lib_path).is_some());
+        assert!(resolver.files.contains_key(&lib_path));
 
         // src/cmd.rs -> use crate::User;
         let main_path = PathBuf::from("src/cmd.rs");

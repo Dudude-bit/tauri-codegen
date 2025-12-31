@@ -117,7 +117,7 @@ fn generate_command_function(cmd: &TauriCommand, ctx: &GeneratorContext) -> Stri
             return_type, cmd.name
         ));
     } else {
-        let args_obj = generate_args_object(&cmd.args);
+        let args_obj = generate_args_object(&cmd.args, cmd.rename_all.as_deref());
         output.push_str(&format!(
             "  return invoke<{}>(\"{}\", {{ {} }});\n",
             return_type, cmd.name, args_obj
@@ -150,16 +150,29 @@ fn generate_return_type(return_type: &Option<RustType>, ctx: &GeneratorContext) 
 }
 
 /// Generate the arguments object for invoke
-fn generate_args_object(args: &[CommandArg]) -> String {
+/// 
+/// By default, Tauri serializes command arguments to camelCase.
+/// If `rename_all = "snake_case"` is specified, arguments stay as snake_case.
+fn generate_args_object(args: &[CommandArg], rename_all: Option<&str>) -> String {
+    let use_snake_case = rename_all == Some("snake_case");
+    
     args.iter()
         .map(|arg| {
             let param_name = to_camel_case(&arg.name);
-            // If the Rust name (snake_case) differs from camelCase, use object shorthand
-            if arg.name == param_name {
-                param_name
+            
+            if use_snake_case {
+                // With rename_all = "snake_case", Tauri expects snake_case keys
+                if arg.name == param_name {
+                    // Already the same (e.g., single word like "id")
+                    param_name
+                } else {
+                    // Map camelCase param to snake_case key
+                    format!("{}: {}", arg.name, param_name)
+                }
             } else {
-                // Need to map camelCase param to snake_case key
-                format!("{}: {}", arg.name, param_name)
+                // Default: Tauri expects camelCase keys
+                // Use shorthand since param name matches key name
+                param_name
             }
         })
         .collect::<Vec<_>>()
@@ -257,6 +270,7 @@ mod tests {
             }],
             return_type: Some(RustType::Custom("User".to_string())),
             source_file: test_path(),
+            rename_all: None,
         };
 
         let mut ctx = default_ctx();
@@ -277,6 +291,7 @@ mod tests {
             args: vec![],
             return_type: Some(RustType::Vec(Box::new(RustType::Custom("Item".to_string())))),
             source_file: test_path(),
+            rename_all: None,
         };
 
         let ctx = ctx_with_type("Item");
@@ -309,6 +324,7 @@ mod tests {
             ],
             return_type: Some(RustType::Custom("User".to_string())),
             source_file: test_path(),
+            rename_all: None,
         };
 
         let ctx = ctx_with_type("User");
@@ -329,6 +345,7 @@ mod tests {
             }],
             return_type: None,
             source_file: test_path(),
+            rename_all: None,
         };
 
         let ctx = default_ctx();
@@ -345,6 +362,7 @@ mod tests {
             args: vec![],
             return_type: None,
             source_file: test_path(),
+            rename_all: None,
         };
 
         let ctx = default_ctx();
@@ -354,7 +372,8 @@ mod tests {
     }
 
     #[test]
-    fn test_snake_case_args_in_invoke() {
+    fn test_default_camel_case_args_in_invoke() {
+        // By default, Tauri expects camelCase keys in invoke
         let cmd = TauriCommand {
             name: "update".to_string(),
             args: vec![CommandArg {
@@ -363,6 +382,7 @@ mod tests {
             }],
             return_type: None,
             source_file: test_path(),
+            rename_all: None,
         };
 
         let ctx = default_ctx();
@@ -370,7 +390,32 @@ mod tests {
 
         // Param should be camelCase
         assert!(output.contains("userId: number"));
-        // But invoke should map back to snake_case
+        // Invoke should use camelCase key (shorthand)
+        assert!(output.contains("{ userId }"));
+        // Should NOT contain snake_case mapping
+        assert!(!output.contains("user_id: userId"));
+    }
+
+    #[test]
+    fn test_snake_case_rename_all_in_invoke() {
+        // With rename_all = "snake_case", Tauri expects snake_case keys
+        let cmd = TauriCommand {
+            name: "update".to_string(),
+            args: vec![CommandArg {
+                name: "user_id".to_string(),
+                ty: RustType::Primitive("i32".to_string()),
+            }],
+            return_type: None,
+            source_file: test_path(),
+            rename_all: Some("snake_case".to_string()),
+        };
+
+        let ctx = default_ctx();
+        let output = generate_command_function(&cmd, &ctx);
+
+        // Param should still be camelCase
+        assert!(output.contains("userId: number"));
+        // But invoke should map camelCase param to snake_case key
         assert!(output.contains("user_id: userId"));
     }
 
@@ -382,6 +427,7 @@ mod tests {
                 args: vec![],
                 return_type: Some(RustType::Custom("User".to_string())),
                 source_file: test_path(),
+                rename_all: None,
             },
             TauriCommand {
                 name: "create".to_string(),
@@ -391,6 +437,7 @@ mod tests {
                 }],
                 return_type: Some(RustType::Custom("User".to_string())),
                 source_file: test_path(),
+                rename_all: None,
             },
         ];
 
@@ -414,6 +461,7 @@ mod tests {
                 RustType::Custom("User".to_string()),
             ))))),
             source_file: test_path(),
+            rename_all: None,
         }];
 
         let ctx = ctx_with_type("User");
@@ -438,6 +486,7 @@ mod tests {
             args: vec![],
             return_type: None,
             source_file: test_path(),
+            rename_all: None,
         };
 
         let ctx = GeneratorContext::new(NamingConfig {
@@ -458,6 +507,7 @@ mod tests {
             args: vec![],
             return_type: None,
             source_file: test_path(),
+            rename_all: None,
         };
 
         let ctx = GeneratorContext::new(NamingConfig {
@@ -492,6 +542,7 @@ mod tests {
             args: vec![],
             return_type: Some(RustType::Custom("User".to_string())),
             source_file: test_path(),
+            rename_all: None,
         }];
 
         let types_path = Path::new("src/generated/types.ts");
@@ -512,6 +563,7 @@ mod tests {
                 RustType::Custom("User".to_string()),
             ))))),
             source_file: test_path(),
+            rename_all: None,
         };
 
         let ctx = ctx_with_type("User");
@@ -540,6 +592,7 @@ mod tests {
             ],
             return_type: None,
             source_file: test_path(),
+            rename_all: None,
         }];
 
         let types_path = Path::new("types.ts");
