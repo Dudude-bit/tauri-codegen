@@ -103,6 +103,14 @@ pub fn primitive_to_typescript(name: &str) -> Option<&'static str> {
     None
 }
 
+/// Tauri special types that are injected by the framework and not passed from frontend
+pub const TAURI_SPECIAL_TYPES: &[&str] = &["State", "Window", "AppHandle", "Webview", "WebviewWindow"];
+
+/// Check if a type name is a Tauri special type (injected by framework)
+pub fn is_tauri_special_type(name: &str) -> bool {
+    TAURI_SPECIAL_TYPES.contains(&name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

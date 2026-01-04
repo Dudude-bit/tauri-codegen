@@ -37,6 +37,8 @@ pub struct FileScope {
     pub imports: HashMap<String, ImportedType>,
     /// Wildcard imports (use something::*)
     pub wildcard_imports: Vec<Vec<String>>,
+    /// Type aliases: alias name -> base type name (e.g., "AppStateMutexed" -> "State")
+    pub type_aliases: HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -117,6 +119,11 @@ impl ModuleResolver {
                     let name = t.ident.to_string();
                     scope.local_types.insert(name.clone(), TypeKind::Struct); // Treat as struct-like
                     self.register_type_definition(&name, path);
+                    
+                    // Extract the base type name (e.g., "State" from "State<'a, T>")
+                    if let Some(base_type) = extract_base_type_name(&t.ty) {
+                        scope.type_aliases.insert(name, base_type);
+                    }
                 }
                 Item::Mod(m) => {
                     // Recursively parse types inside inline modules
@@ -445,6 +452,67 @@ impl ModuleResolver {
         }
         None
     }
+    
+    /// Resolve a type alias to its final target base type name (follows alias chains)
+    /// For example, given "AliasedState" where:
+    ///   `type MyState<'a> = State<'a, AppState>;`
+    ///   `type AliasedState<'a> = MyState<'a>;`
+    /// Returns Some("State")
+    pub fn resolve_alias_target(&self, type_name: &str, from_file: &Path) -> Option<String> {
+        let mut current = type_name.to_string();
+        let mut found_any = false;
+        
+        // Follow the alias chain (max 10 iterations to prevent infinite loops)
+        for _ in 0..10 {
+            let next = self.resolve_single_alias(&current, from_file);
+            match next {
+                Some(target) => {
+                    found_any = true;
+                    current = target;
+                }
+                None => break,
+            }
+        }
+        
+        if found_any {
+            Some(current)
+        } else {
+            None
+        }
+    }
+    
+    /// Resolve a single level of type alias (no recursion)
+    fn resolve_single_alias(&self, type_name: &str, from_file: &Path) -> Option<String> {
+        if let Some(scope) = self.files.get(from_file) {
+            // Check local type aliases first
+            if let Some(target) = scope.type_aliases.get(type_name) {
+                return Some(target.clone());
+            }
+            
+            // Check imported type aliases
+            if let Some(imported) = scope.imports.get(type_name) {
+                if let ResolutionResult::Found(source_file) = self.resolve_module_path(&imported.path) {
+                    if let Some(source_scope) = self.files.get(&source_file) {
+                        let actual_name = imported.path.last().map(|s| s.as_str()).unwrap_or(type_name);
+                        if let Some(target) = source_scope.type_aliases.get(actual_name) {
+                            return Some(target.clone());
+                        }
+                    }
+                }
+            }
+        }
+        
+        // Try to find in any file (for global lookup)
+        for (file_path, scope) in &self.files {
+            if file_path != from_file {
+                if let Some(target) = scope.type_aliases.get(type_name) {
+                    return Some(target.clone());
+                }
+            }
+        }
+        
+        None
+    }
 }
 
 fn are_siblings(path_a: &[String], path_b: &[String]) -> bool {
@@ -460,6 +528,22 @@ fn are_siblings(path_a: &[String], path_b: &[String]) -> bool {
     // b: [crate, foo, baz]
     // parent: [crate, foo]
     path_a[..path_a.len() - 1] == path_b[..path_b.len() - 1]
+}
+
+/// Extract the base type name from a syn::Type
+/// For example, "State<'a, T>" returns Some("State")
+fn extract_base_type_name(ty: &syn::Type) -> Option<String> {
+    match ty {
+        syn::Type::Path(type_path) => {
+            // Get the last segment (e.g., "State" from "tauri::State")
+            type_path.path.segments.last().map(|seg| seg.ident.to_string())
+        }
+        syn::Type::Reference(type_ref) => {
+            // Handle &T or &mut T
+            extract_base_type_name(&type_ref.elem)
+        }
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -874,5 +958,93 @@ mod tests {
         // Should only have one entry for the path
         let locations = resolver.type_definitions.get("User").unwrap();
         assert_eq!(locations.len(), 1);
+    }
+
+    #[test]
+    fn test_resolve_alias_target_simple() {
+        let mut resolver = ModuleResolver::new();
+
+        let code = r#"
+            pub struct RealType;
+            pub type AliasType = RealType;
+        "#;
+        let path = PathBuf::from("src/types.rs");
+        resolver.parse_file(&path, code, &base_path()).unwrap();
+
+        // resolve_alias_target should return the base type name
+        let target = resolver.resolve_alias_target("AliasType", &path);
+        assert_eq!(target, Some("RealType".to_string()));
+        
+        // Non-alias types should return None
+        let no_target = resolver.resolve_alias_target("RealType", &path);
+        assert_eq!(no_target, None);
+    }
+
+    #[test]
+    fn test_resolve_alias_target_tauri_state() {
+        let mut resolver = ModuleResolver::new();
+
+        // This simulates: type AppStateMutexed<'a> = State<'a, Mutex<AppState>>;
+        let code = r#"
+            pub type AppStateMutexed<'a> = State<'a, Mutex<AppState>>;
+        "#;
+        let path = PathBuf::from("src/commands.rs");
+        resolver.parse_file(&path, code, &base_path()).unwrap();
+
+        // resolve_alias_target should return "State"
+        let target = resolver.resolve_alias_target("AppStateMutexed", &path);
+        assert_eq!(target, Some("State".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_alias_target_generic_type() {
+        let mut resolver = ModuleResolver::new();
+
+        let code = r#"
+            pub type MyWindow = Window;
+            pub type MyHandle<T> = AppHandle<T>;
+        "#;
+        let path = PathBuf::from("src/types.rs");
+        resolver.parse_file(&path, code, &base_path()).unwrap();
+
+        // Both should resolve to their base types
+        assert_eq!(resolver.resolve_alias_target("MyWindow", &path), Some("Window".to_string()));
+        assert_eq!(resolver.resolve_alias_target("MyHandle", &path), Some("AppHandle".to_string()));
+    }
+
+    #[test]
+    fn test_type_alias_stored_in_scope() {
+        let mut resolver = ModuleResolver::new();
+
+        let code = r#"
+            pub type CustomState<'a> = State<'a, MyAppState>;
+        "#;
+        let path = PathBuf::from("src/lib.rs");
+        resolver.parse_file(&path, code, &base_path()).unwrap();
+
+        // Check that the alias is stored in the scope
+        let scope = resolver.files.get(&path).unwrap();
+        assert_eq!(scope.type_aliases.get("CustomState"), Some(&"State".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_alias_chain() {
+        let mut resolver = ModuleResolver::new();
+
+        // Create a chain: AliasedState -> MyState -> State
+        let code = r#"
+            pub type MyState<'a> = State<'a, AppState>;
+            pub type AliasedState<'a> = MyState<'a>;
+        "#;
+        let path = PathBuf::from("src/types.rs");
+        resolver.parse_file(&path, code, &base_path()).unwrap();
+
+        // resolve_alias_target should follow the chain to "State"
+        let target = resolver.resolve_alias_target("AliasedState", &path);
+        assert_eq!(target, Some("State".to_string()));
+        
+        // MyState should also resolve to State
+        let target2 = resolver.resolve_alias_target("MyState", &path);
+        assert_eq!(target2, Some("State".to_string()));
     }
 }

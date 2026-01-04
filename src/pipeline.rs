@@ -12,6 +12,7 @@ use crate::config::Config;
 use crate::generator::{
     commands_gen::generate_commands_file, types_gen::generate_types_file, GeneratorContext,
 };
+use crate::known_types;
 use crate::models::{ParseResult, RustEnum, RustStruct, RustType};
 use crate::parser::{parse_commands, parse_types, parse_types_expanded};
 use crate::resolver::{ModuleResolver, ResolutionResult};
@@ -61,7 +62,10 @@ impl Pipeline {
         };
 
         // Step 2: Parse all files and build resolver
-        let (parse_result, resolver) = self.parse_files(&rust_files, config, expanded_code.as_deref())?;
+        let (mut parse_result, resolver) = self.parse_files(&rust_files, config, expanded_code.as_deref())?;
+
+        // Step 2.5: Filter out Tauri special types (State, Window, etc.) including aliases
+        self.filter_tauri_special_args(&mut parse_result.commands, &resolver);
 
         // Step 3: Collect and resolve types used in commands
         let type_collection = self.collect_used_types(&parse_result, &resolver);
@@ -631,6 +635,44 @@ impl Pipeline {
 
         Ok(())
     }
+    
+    /// Step 2.5: Filter out Tauri special types from command arguments
+    /// This handles both direct uses (State<T>) and type aliases (type MyState = State<T>)
+    fn filter_tauri_special_args(
+        &self,
+        commands: &mut [crate::models::TauriCommand],
+        resolver: &ModuleResolver,
+    ) {
+        for cmd in commands.iter_mut() {
+            cmd.args.retain(|arg| {
+                // Get the base type name from the RustType
+                let type_name = match &arg.ty {
+                    RustType::Custom(name) => {
+                        // Extract just the type name (without path)
+                        name.split("::").last().unwrap_or(name).to_string()
+                    }
+                    RustType::Unknown(name) => {
+                        name.split("::").last().unwrap_or(name).to_string()
+                    }
+                    _ => return true, // Keep primitives, Vec, Option, etc.
+                };
+                
+                // Check if it's directly a Tauri special type
+                if known_types::is_tauri_special_type(&type_name) {
+                    return false;
+                }
+                
+                // Check if it's an alias to a Tauri special type
+                if let Some(target) = resolver.resolve_alias_target(&type_name, &cmd.source_file) {
+                    if known_types::is_tauri_special_type(&target) {
+                        return false;
+                    }
+                }
+                
+                true
+            });
+        }
+    }
 }
 
 /// Collect custom type names from a RustType (returns a Vec)
@@ -1056,6 +1098,103 @@ mod tests {
 
         assert!(result.resolved.contains_key("Request"));
         assert!(result.resolved.contains_key("Response"));
+    }
+
+    #[test]
+    fn test_filter_tauri_special_types() {
+        let pipeline = Pipeline::new(false);
+        let resolver = ModuleResolver::new();
+
+        // Create a command with special Tauri types
+        let mut commands = vec![TauriCommand {
+            name: "test_command".to_string(),
+            args: vec![
+                CommandArg {
+                    name: "state".to_string(),
+                    ty: RustType::Custom("State".to_string()),
+                },
+                CommandArg {
+                    name: "window".to_string(),
+                    ty: RustType::Custom("Window".to_string()),
+                },
+                CommandArg {
+                    name: "id".to_string(),
+                    ty: RustType::Primitive("i32".to_string()),
+                },
+            ],
+            return_type: None,
+            source_file: test_path(),
+            rename_all: None,
+        }];
+
+        pipeline.filter_tauri_special_args(&mut commands, &resolver);
+
+        // State and Window should be filtered out
+        assert_eq!(commands[0].args.len(), 1);
+        assert_eq!(commands[0].args[0].name, "id");
+    }
+
+    #[test]
+    fn test_filter_tauri_app_handle() {
+        let pipeline = Pipeline::new(false);
+        let resolver = ModuleResolver::new();
+
+        let mut commands = vec![TauriCommand {
+            name: "with_app".to_string(),
+            args: vec![
+                CommandArg {
+                    name: "app".to_string(),
+                    ty: RustType::Custom("AppHandle".to_string()),
+                },
+                CommandArg {
+                    name: "data".to_string(),
+                    ty: RustType::Primitive("String".to_string()),
+                },
+            ],
+            return_type: None,
+            source_file: test_path(),
+            rename_all: None,
+        }];
+
+        pipeline.filter_tauri_special_args(&mut commands, &resolver);
+
+        // AppHandle should be filtered out
+        assert_eq!(commands[0].args.len(), 1);
+        assert_eq!(commands[0].args[0].name, "data");
+    }
+
+    #[test]
+    fn test_filter_tauri_special_types_via_alias() {
+        let pipeline = Pipeline::new(false);
+        let mut resolver = ModuleResolver::new();
+
+        // Register a type alias: type MyState = State<AppState>
+        let code = "pub type MyState<'a> = State<'a, AppState>;";
+        let path = test_path();
+        resolver.parse_file(&path, code, &PathBuf::from(".")).unwrap();
+
+        let mut commands = vec![TauriCommand {
+            name: "aliased_command".to_string(),
+            args: vec![
+                CommandArg {
+                    name: "state".to_string(),
+                    ty: RustType::Custom("MyState".to_string()),
+                },
+                CommandArg {
+                    name: "id".to_string(),
+                    ty: RustType::Primitive("i32".to_string()),
+                },
+            ],
+            return_type: None,
+            source_file: path.clone(),
+            rename_all: None,
+        }];
+
+        pipeline.filter_tauri_special_args(&mut commands, &resolver);
+
+        // MyState (alias to State) should be filtered out
+        assert_eq!(commands[0].args.len(), 1);
+        assert_eq!(commands[0].args[0].name, "id");
     }
 }
 

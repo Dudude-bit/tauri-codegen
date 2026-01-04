@@ -1,7 +1,7 @@
 use crate::models::{CommandArg, RustType, TauriCommand};
 use anyhow::Result;
 use std::path::Path;
-use syn::{FnArg, ItemFn, ReturnType, Type};
+use syn::{FnArg, ItemFn, ReturnType};
 
 use super::type_extractor::parse_type;
 
@@ -159,32 +159,12 @@ fn parse_fn_arg(arg: &FnArg) -> Option<CommandArg> {
                 _ => return None,
             };
 
-            // Skip special Tauri types like State, Window, AppHandle
-            if is_tauri_special_type(&pat_type.ty) {
-                return None;
-            }
-
             let ty = parse_type(&pat_type.ty);
 
             Some(CommandArg { name, ty })
         }
         FnArg::Receiver(_) => None, // Skip self arguments
     }
-}
-
-/// Check if a type is a special Tauri type that should be skipped
-fn is_tauri_special_type(ty: &Type) -> bool {
-    if let Type::Path(type_path) = ty {
-        if let Some(segment) = type_path.path.segments.last() {
-            let name = segment.ident.to_string();
-            // These are injected by Tauri and not passed from frontend
-            return matches!(
-                name.as_str(),
-                "State" | "Window" | "AppHandle" | "Webview" | "WebviewWindow"
-            );
-        }
-    }
-    false
 }
 
 /// Parse the return type of a function
@@ -290,37 +270,6 @@ mod tests {
         assert_eq!(commands.len(), 1);
         assert_eq!(commands[0].name, "fetch_data");
         assert!(commands[0].return_type.is_some());
-    }
-
-    #[test]
-    fn test_skip_tauri_special_types() {
-        let code = r#"
-            #[tauri::command]
-            fn with_state(state: State<AppState>, window: Window, id: i32) {
-                unimplemented!()
-            }
-        "#;
-
-        let commands = parse_commands(code, &test_path()).unwrap();
-        assert_eq!(commands.len(), 1);
-        // Only 'id' should be included, State and Window should be skipped
-        assert_eq!(commands[0].args.len(), 1);
-        assert_eq!(commands[0].args[0].name, "id");
-    }
-
-    #[test]
-    fn test_skip_app_handle() {
-        let code = r#"
-            #[tauri::command]
-            fn with_app(app: AppHandle, data: String) {
-                unimplemented!()
-            }
-        "#;
-
-        let commands = parse_commands(code, &test_path()).unwrap();
-        assert_eq!(commands.len(), 1);
-        assert_eq!(commands[0].args.len(), 1);
-        assert_eq!(commands[0].args[0].name, "data");
     }
 
     #[test]
