@@ -90,7 +90,7 @@ The generator maps Rust types to TypeScript as follows:
 | `String`, `&str`, `char` | `string` |
 | `i8`...`i64`, `u8`...`u64`, `f32`, `f64` | `number` |
 | `bool` | `boolean` |
-| `Option<T>` | `T \| null` (default), or `T \| undefined` (`prop?: T`) (with `#[ts(optional)]`) |
+| `Option<T>` | `T \| null` (default), or optional field `?: T` (with `#[ts(optional)]`) |
 | `Vec<T>` | `T[]` |
 | `HashMap<K, V>` | `Record<K, V>` (if K is string/number) |
 | `Result<T, E>` | `Promise<T>` (in return types) |
