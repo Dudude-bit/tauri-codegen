@@ -49,15 +49,18 @@ fn generate_interface(s: &RustStruct, ctx: &GeneratorContext) -> String {
     ));
 
     for field in &s.fields {
-        // If use_optional is true and type is Option<T>, generate T | undefined
-        let ts_type = if field.use_optional {
+        // If use_optional is true and type is Option<T>, generate field?: T instead of field: T | null
+        let (optional_marker, ts_type) = if field.use_optional {
             if let crate::models::RustType::Option(inner) = &field.ty {
-                format!("{} | undefined", rust_to_typescript(inner, ctx))
+                let ts_type = rust_to_typescript(inner, ctx);
+                ("?", ts_type)
             } else {
-                rust_to_typescript(&field.ty, ctx)
+                let ts_type = rust_to_typescript(&field.ty, ctx);
+                ("", ts_type)
             }
         } else {
-            rust_to_typescript(&field.ty, ctx)
+            let ts_type = rust_to_typescript(&field.ty, ctx);
+            ("", ts_type)
         };
         // If serde rename was explicitly set, use the name as-is
         // Otherwise, convert to camelCase
@@ -66,7 +69,10 @@ fn generate_interface(s: &RustStruct, ctx: &GeneratorContext) -> String {
         } else {
             to_camel_case(&field.name)
         };
-        output.push_str(&format!("  {}: {};\n", field_name, ts_type));
+        output.push_str(&format!(
+            "  {}{}: {};\n",
+            field_name, optional_marker, ts_type
+        ));
     }
 
     output.push_str("}\n");
@@ -132,22 +138,24 @@ fn generate_variant(
                 format!("{{ {}: {} }}", variant.name, inner)
             }
         },
-        EnumRepresentation::Internal { tag } => match &variant.data {
-            VariantData::Unit => format!("{{ {}: \"{}\" }}", tag, variant.name),
-            VariantData::Struct(fields) => {
-                let mut body = generate_struct_body(fields, ctx);
-                // Remove opening brace and insert tag
-                body.remove(0); // remove '{'
-                format!("{{ {}: \"{}\",{}", tag, variant.name, body)
+        EnumRepresentation::Internal { tag } => {
+            match &variant.data {
+                VariantData::Unit => format!("{{ {}: \"{}\" }}", tag, variant.name),
+                VariantData::Struct(fields) => {
+                    let mut body = generate_struct_body(fields, ctx);
+                    // Remove opening brace and insert tag
+                    body.remove(0); // remove '{'
+                    format!("{{ {}: \"{}\",{}", tag, variant.name, body)
+                }
+                VariantData::Tuple(_) => {
+                    // Internal tagging doesn't support tuples strictly speaking (unless newtype around struct)
+                    // We'll fallback to just the tag for now or maybe error?
+                    // For safety let's just emit { tag: "Name" } & Partial<Tuple> ??
+                    // Let's assume user knows what they are doing and it's likely not used with Tuples
+                    format!("{{ {}: \"{}\" /* Tuple variants not fully supported in internal tagging */ }}", tag, variant.name)
+                }
             }
-            VariantData::Tuple(_) => {
-                // Internal tagging doesn't support tuples strictly speaking (unless newtype around struct)
-                // We'll fallback to just the tag for now or maybe error?
-                // For safety let's just emit { tag: "Name" } & Partial<Tuple> ??
-                // Let's assume user knows what they are doing and it's likely not used with Tuples
-                format!("{{ {}: \"{}\" /* Tuple variants not fully supported in internal tagging */ }}", tag, variant.name)
-            }
-        },
+        }
         EnumRepresentation::Adjacent { tag, content } => match &variant.data {
             VariantData::Unit => format!("{{ {}: \"{}\" }}", tag, variant.name),
             VariantData::Tuple(types) => {
@@ -157,22 +165,28 @@ fn generate_variant(
                 } else {
                     format!("[{}]", ts_types.join(", "))
                 };
-                format!("{{ {}: \"{}\"; {}: {} }}", tag, variant.name, content, inner)
+                format!(
+                    "{{ {}: \"{}\"; {}: {} }}",
+                    tag, variant.name, content, inner
+                )
             }
             VariantData::Struct(fields) => {
                 let inner = generate_struct_body(fields, ctx);
-                format!("{{ {}: \"{}\"; {}: {} }}", tag, variant.name, content, inner)
+                format!(
+                    "{{ {}: \"{}\"; {}: {} }}",
+                    tag, variant.name, content, inner
+                )
             }
         },
         EnumRepresentation::Untagged => match &variant.data {
             VariantData::Unit => "null".to_string(), // Untagged unit matches null? Or nothing? Serde says it errors if it can't match. Usually untagged is for matching shapes.
             VariantData::Tuple(types) => {
-                 let ts_types: Vec<_> = types.iter().map(|t| rust_to_typescript(t, ctx)).collect();
-                 if ts_types.len() == 1 {
-                     ts_types[0].clone()
-                 } else {
-                     format!("[{}]", ts_types.join(", "))
-                 }
+                let ts_types: Vec<_> = types.iter().map(|t| rust_to_typescript(t, ctx)).collect();
+                if ts_types.len() == 1 {
+                    ts_types[0].clone()
+                } else {
+                    format!("[{}]", ts_types.join(", "))
+                }
             }
             VariantData::Struct(fields) => generate_struct_body(fields, ctx),
         },
@@ -182,15 +196,18 @@ fn generate_variant(
 fn generate_struct_body(fields: &[crate::models::StructField], ctx: &GeneratorContext) -> String {
     let mut params = Vec::new();
     for field in fields {
-        // If use_optional is true and type is Option<T>, generate T | undefined
-        let ts_type = if field.use_optional {
+        // If use_optional is true and type is Option<T>, generate field?: T instead of field: T | null
+        let (optional_marker, ts_type) = if field.use_optional {
             if let crate::models::RustType::Option(inner) = &field.ty {
-                format!("{} | undefined", rust_to_typescript(inner, ctx))
+                let ts_type = rust_to_typescript(inner, ctx);
+                ("?", ts_type)
             } else {
-                rust_to_typescript(&field.ty, ctx)
+                let ts_type = rust_to_typescript(&field.ty, ctx);
+                ("", ts_type)
             }
         } else {
-            rust_to_typescript(&field.ty, ctx)
+            let ts_type = rust_to_typescript(&field.ty, ctx);
+            ("", ts_type)
         };
         // If serde rename was explicitly set, use the name as-is
         // Otherwise, convert to camelCase
@@ -199,7 +216,7 @@ fn generate_struct_body(fields: &[crate::models::StructField], ctx: &GeneratorCo
         } else {
             to_camel_case(&field.name)
         };
-        params.push(format!("{}: {}", field_name, ts_type));
+        params.push(format!("{}{}: {}", field_name, optional_marker, ts_type));
     }
     format!("{{ {} }}", params.join("; "))
 }
@@ -225,11 +242,15 @@ mod tests {
             name: "User".to_string(),
             generics: vec![],
             fields: vec![
-                StructField { has_explicit_rename: false, use_optional: false,
+                StructField {
+                    has_explicit_rename: false,
+                    use_optional: false,
                     name: "id".to_string(),
                     ty: RustType::Primitive("i32".to_string()),
                 },
-                StructField { has_explicit_rename: false, use_optional: false,
+                StructField {
+                    has_explicit_rename: false,
+                    use_optional: false,
                     name: "name".to_string(),
                     ty: RustType::Primitive("String".to_string()),
                 },
@@ -251,11 +272,15 @@ mod tests {
             name: "Wrapper".to_string(),
             generics: vec!["T".to_string()],
             fields: vec![
-                StructField { has_explicit_rename: false, use_optional: false,
+                StructField {
+                    has_explicit_rename: false,
+                    use_optional: false,
                     name: "data".to_string(),
                     ty: RustType::Generic("T".to_string()),
                 },
-                StructField { has_explicit_rename: false, use_optional: false,
+                StructField {
+                    has_explicit_rename: false,
+                    use_optional: false,
                     name: "count".to_string(),
                     ty: RustType::Primitive("i32".to_string()),
                 },
@@ -277,11 +302,15 @@ mod tests {
             name: "Pair".to_string(),
             generics: vec!["K".to_string(), "V".to_string()],
             fields: vec![
-                StructField { has_explicit_rename: false, use_optional: false,
+                StructField {
+                    has_explicit_rename: false,
+                    use_optional: false,
                     name: "key".to_string(),
                     ty: RustType::Generic("K".to_string()),
                 },
-                StructField { has_explicit_rename: false, use_optional: false,
+                StructField {
+                    has_explicit_rename: false,
+                    use_optional: false,
                     name: "value".to_string(),
                     ty: RustType::Generic("V".to_string()),
                 },
@@ -301,15 +330,18 @@ mod tests {
             name: "Status".to_string(),
             generics: vec![],
             variants: vec![
-                EnumVariant { has_explicit_rename: false,
+                EnumVariant {
+                    has_explicit_rename: false,
                     name: "Active".to_string(),
                     data: VariantData::Unit,
                 },
-                EnumVariant { has_explicit_rename: false,
+                EnumVariant {
+                    has_explicit_rename: false,
                     name: "Inactive".to_string(),
                     data: VariantData::Unit,
                 },
-                EnumVariant { has_explicit_rename: false,
+                EnumVariant {
+                    has_explicit_rename: false,
                     name: "Pending".to_string(),
                     data: VariantData::Unit,
                 },
@@ -333,11 +365,13 @@ mod tests {
             name: "Message".to_string(),
             generics: vec![],
             variants: vec![
-                EnumVariant { has_explicit_rename: false,
+                EnumVariant {
+                    has_explicit_rename: false,
                     name: "Text".to_string(),
                     data: VariantData::Tuple(vec![RustType::Primitive("String".to_string())]),
                 },
-                EnumVariant { has_explicit_rename: false,
+                EnumVariant {
+                    has_explicit_rename: false,
                     name: "Number".to_string(),
                     data: VariantData::Tuple(vec![RustType::Primitive("i32".to_string())]),
                 },
@@ -348,7 +382,7 @@ mod tests {
 
         let ctx = default_ctx();
         let output = generate_enum_type(&e, &ctx);
-        
+
         assert!(output.contains("export type Message ="));
         // External representation: { Text: string } | { Number: number }
         assert!(output.contains("Text: string"));
@@ -361,20 +395,26 @@ mod tests {
             name: "UserRole".to_string(),
             generics: vec![],
             variants: vec![
-                EnumVariant { has_explicit_rename: false,
+                EnumVariant {
+                    has_explicit_rename: false,
                     name: "Admin".to_string(),
-                    data: VariantData::Struct(vec![StructField { has_explicit_rename: false, use_optional: false,
+                    data: VariantData::Struct(vec![StructField {
+                        has_explicit_rename: false,
+                        use_optional: false,
                         name: "permissions".to_string(),
                         ty: RustType::Vec(Box::new(RustType::Primitive("String".to_string()))),
                     }]),
                 },
-                EnumVariant { has_explicit_rename: false,
+                EnumVariant {
+                    has_explicit_rename: false,
                     name: "User".to_string(),
                     data: VariantData::Unit,
                 },
             ],
             source_file: test_path(),
-            representation: EnumRepresentation::Internal { tag: "type".to_string() },
+            representation: EnumRepresentation::Internal {
+                tag: "type".to_string(),
+            },
         };
 
         let ctx = default_ctx();
@@ -391,11 +431,15 @@ mod tests {
             name: "User".to_string(),
             generics: vec![],
             fields: vec![
-                StructField { has_explicit_rename: false, use_optional: false,
+                StructField {
+                    has_explicit_rename: false,
+                    use_optional: false,
                     name: "user_id".to_string(),
                     ty: RustType::Primitive("i32".to_string()),
                 },
-                StructField { has_explicit_rename: false, use_optional: false,
+                StructField {
+                    has_explicit_rename: false,
+                    use_optional: false,
                     name: "first_name".to_string(),
                     ty: RustType::Primitive("String".to_string()),
                 },
@@ -440,7 +484,9 @@ mod tests {
             RustStruct {
                 name: "User".to_string(),
                 generics: vec![],
-                fields: vec![StructField { has_explicit_rename: false, use_optional: false,
+                fields: vec![StructField {
+                    has_explicit_rename: false,
+                    use_optional: false,
                     name: "id".to_string(),
                     ty: RustType::Primitive("i32".to_string()),
                 }],
@@ -449,7 +495,9 @@ mod tests {
             RustStruct {
                 name: "Item".to_string(),
                 generics: vec![],
-                fields: vec![StructField { has_explicit_rename: false, use_optional: false,
+                fields: vec![StructField {
+                    has_explicit_rename: false,
+                    use_optional: false,
                     name: "name".to_string(),
                     ty: RustType::Primitive("String".to_string()),
                 }],
@@ -460,12 +508,11 @@ mod tests {
         let enums = vec![RustEnum {
             name: "Status".to_string(),
             generics: vec![],
-            variants: vec![
-                EnumVariant { has_explicit_rename: false,
-                    name: "Active".to_string(),
-                    data: VariantData::Unit,
-                },
-            ],
+            variants: vec![EnumVariant {
+                has_explicit_rename: false,
+                name: "Active".to_string(),
+                data: VariantData::Unit,
+            }],
             source_file: test_path(),
             representation: EnumRepresentation::default(),
         }];
@@ -483,7 +530,9 @@ mod tests {
         let s = RustStruct {
             name: "User".to_string(),
             generics: vec![],
-            fields: vec![StructField { has_explicit_rename: false, use_optional: false,
+            fields: vec![StructField {
+                has_explicit_rename: false,
+                use_optional: false,
                 name: "email".to_string(),
                 ty: RustType::Option(Box::new(RustType::Primitive("String".to_string()))),
             }],
@@ -501,7 +550,9 @@ mod tests {
         let s = RustStruct {
             name: "User".to_string(),
             generics: vec![],
-            fields: vec![StructField { has_explicit_rename: false, use_optional: false,
+            fields: vec![StructField {
+                has_explicit_rename: false,
+                use_optional: false,
                 name: "tags".to_string(),
                 ty: RustType::Vec(Box::new(RustType::Primitive("String".to_string()))),
             }],
@@ -568,7 +619,7 @@ mod tests {
 
         assert!(output.contains("userName: string"));
         assert!(output.contains("API_KEY: string"));
-        assert!(!output.contains("apiKey: string")); 
+        assert!(!output.contains("apiKey: string"));
         assert!(output.contains("snake_case_kept: boolean"));
         assert!(!output.contains("snakeCaseKept: boolean"));
     }
@@ -607,26 +658,24 @@ mod tests {
         let e = RustEnum {
             name: "Event".to_string(),
             generics: vec![],
-            variants: vec![
-                EnumVariant {
-                    name: "Login".to_string(),
-                    data: VariantData::Struct(vec![
-                        StructField {
-                            name: "user_id".to_string(),
-                            ty: RustType::Primitive("i32".to_string()),
-                            has_explicit_rename: false, // Normal conversion -> userId
-                            use_optional: false,
-                        },
-                        StructField {
-                            name: "TIMESTAMP".to_string(),
-                            ty: RustType::Primitive("i64".to_string()),
-                            has_explicit_rename: true, // Kept as TIMESTAMP
-                            use_optional: false,
-                        },
-                    ]),
-                    has_explicit_rename: false,
-                },
-            ],
+            variants: vec![EnumVariant {
+                name: "Login".to_string(),
+                data: VariantData::Struct(vec![
+                    StructField {
+                        name: "user_id".to_string(),
+                        ty: RustType::Primitive("i32".to_string()),
+                        has_explicit_rename: false, // Normal conversion -> userId
+                        use_optional: false,
+                    },
+                    StructField {
+                        name: "TIMESTAMP".to_string(),
+                        ty: RustType::Primitive("i64".to_string()),
+                        has_explicit_rename: true, // Kept as TIMESTAMP
+                        use_optional: false,
+                    },
+                ]),
+                has_explicit_rename: false,
+            }],
             source_file: test_path(),
             representation: EnumRepresentation::default(), // External tagging
         };
@@ -664,7 +713,7 @@ mod tests {
         let ctx = default_ctx();
         let output = generate_interface(&s, &ctx);
 
-        assert!(output.contains("volume: number | undefined"));
+        assert!(output.contains("volume?: number"));
         assert!(output.contains("name: string | null"));
     }
 }

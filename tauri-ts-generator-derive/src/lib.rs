@@ -23,7 +23,7 @@ use syn::{parse_macro_input, DeriveInput};
 ///
 /// #[derive(TS)]
 /// pub struct Config {
-///     // This field will be typed as `number | undefined` in TypeScript
+///     // This field will be typed as `prop?: number` in TypeScript
 ///     #[ts(optional)]
 ///     pub volume: Option<f32>,
 ///     
