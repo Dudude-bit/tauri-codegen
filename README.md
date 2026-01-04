@@ -12,6 +12,7 @@ A powerful CLI tool to automatically generate TypeScript bindings from your Rust
     - Respects `#[serde(rename = "...")]` attributes, preserving the exact name and overriding camelCase conversion.
     - Handles `#[serde(rename_all = "...")]` for enums.
     - Supports `#[serde(tag = "...")]`, `#[serde(content = "...")]`, and `#[serde(untagged)]` enum representations.
+    - Support for `#[ts(undefined)]` attribute on `Option` fields to generate `T | undefined` instead of `T | null`.
 - **Smart Type Mapping**:
     - Maps common Rust types (`String`, `Vec`, `Option`, `Result`) to TypeScript equivalents.
     - Handles external crate types like `chrono::DateTime`, `uuid::Uuid`, `url::Url`, and `rust_decimal::Decimal`.
@@ -88,7 +89,7 @@ The generator maps Rust types to TypeScript as follows:
 | `String`, `&str`, `char` | `string` |
 | `i8`...`i64`, `u8`...`u64`, `f32`, `f64` | `number` |
 | `bool` | `boolean` |
-| `Option<T>` | `T \| null` |
+| `Option<T>` | `T \| null` (default), or `T \| undefined` (with `#[ts(undefined)]`) |
 | `Vec<T>` | `T[]` |
 | `HashMap<K, V>` | `Record<K, V>` (if K is string/number) |
 | `Result<T, E>` | `Promise<T>` (in return types) |
@@ -186,6 +187,28 @@ pub fn update_user(user_id: i32, new_email: String) { /* ... */ }
 export async function updateUser(userId: number, newEmail: string): Promise<void> {
   // Arguments are mapped to snake_case in the payload
   return invoke<void>("update_user", { user_id: userId, new_email: newEmail });
+}
+```
+
+### 5. Option with Undefined
+By default, `Option<T>` maps to `T | null`. You can use the `#[ts(undefined)]` attribute to map it to `T | undefined` instead.
+
+**Rust:**
+```rust
+#[derive(Serialize)]
+pub struct Config {
+    pub name: Option<String>,
+    
+    #[ts(undefined)]
+    pub volume: Option<f32>,
+}
+```
+
+**TypeScript Output:**
+```typescript
+export interface Config {
+  name: string | null;      // Default behavior
+  volume: number | undefined; // With #[ts(undefined)]
 }
 ```
 
