@@ -1,19 +1,26 @@
 /// Convert snake_case to camelCase
-/// Handles edge cases like double underscores and trailing underscores
+/// Handles edge cases like double underscores, leading underscores, and trailing underscores
 pub fn to_camel_case(s: &str) -> String {
     let mut result = String::new();
     let mut capitalize_next = false;
-    let mut first_char = true;
+    let mut seen_non_underscore = false;
 
     for c in s.chars() {
         if c == '_' {
-            capitalize_next = true;
+            // Only capitalize next if we've seen a non-underscore character
+            // This prevents leading underscores from capitalizing the first letter
+            if seen_non_underscore {
+                capitalize_next = true;
+            }
+            // Skip the underscore (don't add to result)
         } else if capitalize_next {
             result.push(c.to_ascii_uppercase());
             capitalize_next = false;
-        } else if first_char {
+            seen_non_underscore = true;
+        } else if !seen_non_underscore {
+            // First non-underscore character: lowercase it
             result.push(c.to_ascii_lowercase());
-            first_char = false;
+            seen_non_underscore = true;
         } else {
             result.push(c);
         }
@@ -65,8 +72,10 @@ mod tests {
     fn test_to_camel_case_edge_cases() {
         // Double underscores - skipped
         assert_eq!(to_camel_case("get__user"), "getUser");
-        // Leading underscore - treated as capitalize next (result is empty start)
-        assert_eq!(to_camel_case("_private"), "Private");
+        // Leading underscore - should NOT capitalize first letter
+        assert_eq!(to_camel_case("_private"), "private");
+        // Multiple leading underscores
+        assert_eq!(to_camel_case("__private_field"), "privateField");
         // Trailing underscore - just ignored
         assert_eq!(to_camel_case("trailing_"), "trailing");
         // Single letter

@@ -12,6 +12,15 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use syn::{Item, UseTree};
 
+/// Maps type names to their source file locations
+pub type TypeLocations = HashMap<String, Vec<PathBuf>>;
+
+/// Maps alias names to their original type names
+pub type AliasMap = HashMap<String, String>;
+
+/// A module path represented as a list of path segments
+pub type ModulePath = Vec<String>;
+
 /// Result of a type resolution attempt
 #[derive(Debug, Clone, PartialEq)]
 pub enum ResolutionResult {
@@ -30,15 +39,15 @@ pub enum ResolutionResult {
 #[derive(Debug, Default)]
 pub struct FileScope {
     /// Module path (e.g., ["crate", "commands"] for src/commands.rs)
-    pub module_path: Vec<String>,
+    pub module_path: ModulePath,
     /// Types defined locally in this file (name -> kind)
     pub local_types: HashMap<String, TypeKind>,
     /// Imports: local name -> full path
     pub imports: HashMap<String, ImportedType>,
     /// Wildcard imports (use something::*)
-    pub wildcard_imports: Vec<Vec<String>>,
+    pub wildcard_imports: Vec<ModulePath>,
     /// Type aliases: alias name -> base type name (e.g., "AppStateMutexed" -> "State")
-    pub type_aliases: HashMap<String, String>,
+    pub type_aliases: AliasMap,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -50,7 +59,7 @@ pub enum TypeKind {
 #[derive(Debug, Clone)]
 pub struct ImportedType {
     /// Full module path (e.g., ["crate", "internal", "UserRole"])
-    pub path: Vec<String>,
+    pub path: ModulePath,
 }
 
 /// Module resolver that tracks all files and their scopes

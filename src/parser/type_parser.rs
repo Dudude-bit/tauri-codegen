@@ -266,6 +266,11 @@ fn parse_struct(item: &ItemStruct, source_file: &Path) -> Option<RustStruct> {
             .named
             .iter()
             .filter_map(|field| {
+                // Skip fields with #[serde(skip)] or similar
+                if has_serde_skip(&field.attrs) {
+                    return None;
+                }
+
                 let field_name = field.ident.as_ref()?.to_string();
                 let field_type = parse_type_with_context(&field.ty, &generic_params);
 
@@ -376,6 +381,11 @@ fn parse_enum(item: &ItemEnum, source_file: &Path) -> Option<RustEnum> {
                         .named
                         .iter()
                         .filter_map(|field| {
+                            // Skip fields with #[serde(skip)] or similar
+                            if has_serde_skip(&field.attrs) {
+                                return None;
+                            }
+
                             let field_name = field.ident.as_ref()?.to_string();
                             let field_type = parse_type_with_context(&field.ty, &generic_params);
                             let explicit_rename = get_serde_rename(&field.attrs);
@@ -466,6 +476,31 @@ fn has_ts_optional(attrs: &[syn::Attribute], ty: &crate::models::RustType) -> bo
     false
 }
 
+/// Check if a field has #[serde(skip)] attribute
+/// Note: We only check for `skip`, not `skip_serializing` or `skip_deserializing`
+/// because those are directional - a struct might be used for both input and output,
+/// and directional skips should still appear in TypeScript for the other direction.
+fn has_serde_skip(attrs: &[syn::Attribute]) -> bool {
+    for attr in attrs {
+        if let Meta::List(meta_list) = &attr.meta {
+            if meta_list.path.is_ident("serde") {
+                if let Ok(nested) = meta_list.parse_args_with(
+                    syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated,
+                ) {
+                    for meta in nested {
+                        if let Meta::Path(path) = meta {
+                            if path.is_ident("skip") {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
 /// Parse serde container attributes (rename_all, etc.)
 fn parse_serde_container_attrs(attrs: &[syn::Attribute]) -> SerdeContainerAttrs {
     let mut result = SerdeContainerAttrs::default();
@@ -527,7 +562,15 @@ fn apply_rename_all(name: &str, rename_all: &Option<String>) -> Option<String> {
         "kebab-case" => to_kebab_case(name),
         "SCREAMING-KEBAB-CASE" => to_screaming_kebab_case(name),
         "PascalCase" => name.to_string(), // Usually already PascalCase in Rust
-        _ => name.to_string(),
+        unknown => {
+            eprintln!(
+                "Warning: Unknown rename_all convention '{}', using original name. \
+                Supported values: lowercase, UPPERCASE, camelCase, snake_case, \
+                SCREAMING_SNAKE_CASE, kebab-case, SCREAMING-KEBAB-CASE, PascalCase",
+                unknown
+            );
+            name.to_string()
+        }
     })
 }
 
@@ -972,7 +1015,7 @@ mod tests {
         assert_eq!(structs[0].name, "User");
     }
 
-    #[test]  
+    #[test]
     fn test_parse_types_regular_ignores_without_derive() {
         // Regular parse_types should NOT find structs without derive
         let code = r#"
@@ -981,8 +1024,60 @@ mod tests {
                 pub user_id: i32,
             }
         "#;
-        
+
         let (structs, _) = super::parse_types(code, &test_path()).unwrap();
         assert_eq!(structs.len(), 0, "Regular parse should not find struct without derive");
+    }
+
+    #[test]
+    fn test_serde_skip_fields_are_excluded() {
+        let code = r#"
+            #[derive(Serialize)]
+            pub struct User {
+                pub id: i32,
+                pub name: String,
+                #[serde(skip)]
+                pub internal_cache: Vec<u8>,
+                #[serde(skip_serializing)]
+                pub password_hash: String,
+                #[serde(skip_deserializing)]
+                pub computed_field: i32,
+            }
+        "#;
+
+        let (structs, _) = parse_types(code, &test_path()).unwrap();
+        assert_eq!(structs.len(), 1);
+        // Only #[serde(skip)] should be excluded
+        // skip_serializing and skip_deserializing are directional and should be kept
+        assert_eq!(structs[0].fields.len(), 4);
+        assert_eq!(structs[0].fields[0].name, "id");
+        assert_eq!(structs[0].fields[1].name, "name");
+        assert_eq!(structs[0].fields[2].name, "password_hash");
+        assert_eq!(structs[0].fields[3].name, "computed_field");
+    }
+
+    #[test]
+    fn test_serde_skip_in_enum_variant_struct() {
+        let code = r#"
+            #[derive(Serialize)]
+            pub enum Event {
+                Login {
+                    user_id: i32,
+                    #[serde(skip)]
+                    internal_token: String,
+                },
+            }
+        "#;
+
+        let (_, enums) = parse_types(code, &test_path()).unwrap();
+        assert_eq!(enums.len(), 1);
+
+        match &enums[0].variants[0].data {
+            crate::models::VariantData::Struct(fields) => {
+                assert_eq!(fields.len(), 1);
+                assert_eq!(fields[0].name, "user_id");
+            }
+            other => panic!("Expected Struct variant, got {:?}", other),
+        }
     }
 }

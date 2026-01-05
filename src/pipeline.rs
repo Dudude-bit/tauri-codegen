@@ -582,6 +582,9 @@ impl Pipeline {
         filtered_structs: &[RustStruct],
         filtered_enums: &[RustEnum],
     ) -> Result<()> {
+        // Ensure output directories exist before writing files
+        config.ensure_output_directories()?;
+
         // Create generator context
         let mut ctx = GeneratorContext::new(config.naming.clone());
 
@@ -594,12 +597,6 @@ impl Pipeline {
 
         // Generate types.ts
         let types_content = generate_types_file(filtered_structs, filtered_enums, &ctx);
-
-        if let Some(parent) = config.output.types_file.parent() {
-            if !parent.exists() {
-                fs::create_dir_all(parent)?;
-            }
-        }
 
         fs::write(&config.output.types_file, &types_content).with_context(|| {
             format!(
@@ -617,12 +614,6 @@ impl Pipeline {
             &config.output.commands_file,
             &ctx,
         );
-
-        if let Some(parent) = config.output.commands_file.parent() {
-            if !parent.exists() {
-                fs::create_dir_all(parent)?;
-            }
-        }
 
         fs::write(&config.output.commands_file, &commands_content).with_context(|| {
             format!(

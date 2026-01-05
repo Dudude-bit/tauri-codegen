@@ -30,6 +30,30 @@ pub fn generate_types_file(
     output
 }
 
+/// Render a single struct field to TypeScript format (name, optional marker, type)
+fn render_field(field: &crate::models::StructField, ctx: &GeneratorContext) -> (String, &'static str, String) {
+    // If use_optional is true and type is Option<T>, generate field?: T instead of field: T | null
+    let (optional_marker, ts_type) = if field.use_optional {
+        if let crate::models::RustType::Option(inner) = &field.ty {
+            ("?", rust_to_typescript(inner, ctx))
+        } else {
+            ("", rust_to_typescript(&field.ty, ctx))
+        }
+    } else {
+        ("", rust_to_typescript(&field.ty, ctx))
+    };
+
+    // If serde rename was explicitly set, use the name as-is
+    // Otherwise, convert to camelCase
+    let field_name = if field.has_explicit_rename {
+        field.name.clone()
+    } else {
+        to_camel_case(&field.name)
+    };
+
+    (field_name, optional_marker, ts_type)
+}
+
 /// Generate a TypeScript interface from a Rust struct
 fn generate_interface(s: &RustStruct, ctx: &GeneratorContext) -> String {
     let mut output = String::new();
@@ -49,26 +73,7 @@ fn generate_interface(s: &RustStruct, ctx: &GeneratorContext) -> String {
     ));
 
     for field in &s.fields {
-        // If use_optional is true and type is Option<T>, generate field?: T instead of field: T | null
-        let (optional_marker, ts_type) = if field.use_optional {
-            if let crate::models::RustType::Option(inner) = &field.ty {
-                let ts_type = rust_to_typescript(inner, ctx);
-                ("?", ts_type)
-            } else {
-                let ts_type = rust_to_typescript(&field.ty, ctx);
-                ("", ts_type)
-            }
-        } else {
-            let ts_type = rust_to_typescript(&field.ty, ctx);
-            ("", ts_type)
-        };
-        // If serde rename was explicitly set, use the name as-is
-        // Otherwise, convert to camelCase
-        let field_name = if field.has_explicit_rename {
-            field.name.clone()
-        } else {
-            to_camel_case(&field.name)
-        };
+        let (field_name, optional_marker, ts_type) = render_field(field, ctx);
         output.push_str(&format!(
             "  {}{}: {};\n",
             field_name, optional_marker, ts_type
@@ -147,12 +152,30 @@ fn generate_variant(
                     body.remove(0); // remove '{'
                     format!("{{ {}: \"{}\",{}", tag, variant.name, body)
                 }
-                VariantData::Tuple(_) => {
-                    // Internal tagging doesn't support tuples strictly speaking (unless newtype around struct)
-                    // We'll fallback to just the tag for now or maybe error?
-                    // For safety let's just emit { tag: "Name" } & Partial<Tuple> ??
-                    // Let's assume user knows what they are doing and it's likely not used with Tuples
-                    format!("{{ {}: \"{}\" /* Tuple variants not fully supported in internal tagging */ }}", tag, variant.name)
+                VariantData::Tuple(types) => {
+                    // Serde's internal tagging doesn't support tuple variants (it errors at runtime).
+                    // However, if it's a newtype (single element), we can try to handle it.
+                    // Emit a warning and generate a best-effort type.
+                    if types.len() == 1 {
+                        // Newtype variant - could potentially work if inner type is a struct
+                        eprintln!(
+                            "Warning: Internal tagging with newtype variant '{}' may not work \
+                            correctly with serde. Consider using adjacent tagging instead.",
+                            variant.name
+                        );
+                        let inner_ts = rust_to_typescript(&types[0], ctx);
+                        // Generate: { tag: "Name" } & InnerType
+                        format!("({{ {}: \"{}\" }} & {})", tag, variant.name, inner_ts)
+                    } else {
+                        eprintln!(
+                            "Warning: Internal tagging does not support tuple variants with \
+                            multiple elements (variant '{}'). Serde will error at runtime. \
+                            Consider using external or adjacent tagging instead.",
+                            variant.name
+                        );
+                        // Fall back to just the tag since this won't work in serde anyway
+                        format!("{{ {}: \"{}\" }}", tag, variant.name)
+                    }
                 }
             }
         }
@@ -194,30 +217,13 @@ fn generate_variant(
 }
 
 fn generate_struct_body(fields: &[crate::models::StructField], ctx: &GeneratorContext) -> String {
-    let mut params = Vec::new();
-    for field in fields {
-        // If use_optional is true and type is Option<T>, generate field?: T instead of field: T | null
-        let (optional_marker, ts_type) = if field.use_optional {
-            if let crate::models::RustType::Option(inner) = &field.ty {
-                let ts_type = rust_to_typescript(inner, ctx);
-                ("?", ts_type)
-            } else {
-                let ts_type = rust_to_typescript(&field.ty, ctx);
-                ("", ts_type)
-            }
-        } else {
-            let ts_type = rust_to_typescript(&field.ty, ctx);
-            ("", ts_type)
-        };
-        // If serde rename was explicitly set, use the name as-is
-        // Otherwise, convert to camelCase
-        let field_name = if field.has_explicit_rename {
-            field.name.clone()
-        } else {
-            to_camel_case(&field.name)
-        };
-        params.push(format!("{}{}: {}", field_name, optional_marker, ts_type));
-    }
+    let params: Vec<String> = fields
+        .iter()
+        .map(|field| {
+            let (field_name, optional_marker, ts_type) = render_field(field, ctx);
+            format!("{}{}: {}", field_name, optional_marker, ts_type)
+        })
+        .collect();
     format!("{{ {} }}", params.join("; "))
 }
 

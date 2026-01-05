@@ -68,7 +68,7 @@ impl Config {
         Ok(config)
     }
 
-    /// Validate the configuration
+    /// Validate the configuration (pure validation, no side effects)
     fn validate(&self) -> Result<()> {
         if !self.input.source_dir.exists() {
             anyhow::bail!(
@@ -76,8 +76,12 @@ impl Config {
                 self.input.source_dir.display()
             );
         }
+        Ok(())
+    }
 
-        // Ensure output directories exist or can be created
+    /// Ensure output directories exist, creating them if necessary
+    /// This should be called before writing output files.
+    pub fn ensure_output_directories(&self) -> Result<()> {
         // Note: create_dir_all is idempotent and handles race conditions
         if let Some(parent) = self.output.types_file.parent() {
             if !parent.as_os_str().is_empty() {

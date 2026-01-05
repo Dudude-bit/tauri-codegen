@@ -3,7 +3,7 @@ members = [".", "tauri-ts-generator-derive"]
 
 [package]
 name = "tauri-ts-generator"
-version = "1.5.2"
+version = "1.6.0"
 edition = "2021"
 description = "CLI tool to generate TypeScript bindings from Tauri commands"
 authors = ["kirillinakin <kirillinyakin@yandex.ru>"]
@@ -52,9 +52,6 @@ walkdir = "2.4"
 
 # Error handling
 anyhow = "1.0"
-
-# For converting case (snake_case to camelCase)
-convert_case = "0.10.0"
 
 [dev-dependencies]
 tempfile = "3.24.0"

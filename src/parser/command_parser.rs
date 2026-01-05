@@ -103,50 +103,34 @@ fn extract_rename_all(attrs: &[syn::Attribute]) -> Option<String> {
     None
 }
 
-/// Parse a function into a TauriCommand
-fn parse_command_fn(func: &ItemFn, source_file: &Path) -> Option<TauriCommand> {
-    let name = func.sig.ident.to_string();
+/// Parse a function signature into a TauriCommand
+fn parse_command_from_signature(
+    sig: &syn::Signature,
+    attrs: &[syn::Attribute],
+    source_file: &Path,
+) -> TauriCommand {
+    let name = sig.ident.to_string();
+    let args = sig.inputs.iter().filter_map(parse_fn_arg).collect();
+    let return_type = parse_return_type(&sig.output);
+    let rename_all = extract_rename_all(attrs);
 
-    let args = func
-        .sig
-        .inputs
-        .iter()
-        .filter_map(parse_fn_arg)
-        .collect();
-
-    let return_type = parse_return_type(&func.sig.output);
-    let rename_all = extract_rename_all(&func.attrs);
-
-    Some(TauriCommand {
+    TauriCommand {
         name,
         args,
         return_type,
         source_file: source_file.to_path_buf(),
         rename_all,
-    })
+    }
+}
+
+/// Parse a function into a TauriCommand
+fn parse_command_fn(func: &ItemFn, source_file: &Path) -> Option<TauriCommand> {
+    Some(parse_command_from_signature(&func.sig, &func.attrs, source_file))
 }
 
 /// Parse a method into a TauriCommand
 fn parse_command_method(method: &syn::ImplItemFn, source_file: &Path) -> Option<TauriCommand> {
-    let name = method.sig.ident.to_string();
-
-    let args = method
-        .sig
-        .inputs
-        .iter()
-        .filter_map(parse_fn_arg)
-        .collect();
-
-    let return_type = parse_return_type(&method.sig.output);
-    let rename_all = extract_rename_all(&method.attrs);
-
-    Some(TauriCommand {
-        name,
-        args,
-        return_type,
-        source_file: source_file.to_path_buf(),
-        rename_all,
-    })
+    Some(parse_command_from_signature(&method.sig, &method.attrs, source_file))
 }
 
 /// Parse a function argument

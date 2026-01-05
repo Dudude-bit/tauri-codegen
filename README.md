@@ -10,8 +10,9 @@ A powerful CLI tool to automatically generate TypeScript bindings from your Rust
 - **Type Safety**: Generates exact TypeScript definitions for Rust structs, enums, and type aliases.
 - **Serde Support**:
     - Respects `#[serde(rename = "...")]` attributes, preserving the exact name and overriding camelCase conversion.
-    - Handles `#[serde(rename_all = "...")]` for enums.
+    - Handles `#[serde(rename_all = "...")]` for enums and structs.
     - Supports `#[serde(tag = "...")]`, `#[serde(content = "...")]`, and `#[serde(untagged)]` enum representations.
+    - Fields with `#[serde(skip)]` are excluded from TypeScript output.
     - Support for `#[ts(optional)]` attribute on `Option` fields to generate `prop?: T` instead of `T | null`.
     - Provides `#[derive(tauri_ts_generator::TS)]` to register the `ts` attribute namespace.
 - **Smart Type Mapping**:
@@ -174,6 +175,12 @@ pub enum Status {
 export type Status = "ACTIVE" | "INACTIVE";
 ```
 
+**Supported `rename_all` values:**
+- `lowercase`, `UPPERCASE`
+- `camelCase`, `PascalCase`
+- `snake_case`, `SCREAMING_SNAKE_CASE`
+- `kebab-case`, `SCREAMING-KEBAB-CASE`
+
 ### 4. Command Arguments Rename
 Use `rename_all` on commands to control argument keys in the `invoke` payload.
 
@@ -214,6 +221,32 @@ pub struct Config {
 export interface Config {
   name: string | null;      // Default behavior
   volume?: number; // With #[ts(optional)]
+}
+```
+
+### 6. Skipping Fields
+Fields with `#[serde(skip)]` are excluded from the TypeScript output. Note that `skip_serializing` and `skip_deserializing` are **not** excluded, as they only affect one direction of serialization.
+
+**Rust:**
+```rust
+#[derive(Serialize)]
+pub struct User {
+    pub id: i32,
+    pub name: String,
+    #[serde(skip)]
+    pub internal_cache: Vec<u8>,  // Excluded from TypeScript
+    #[serde(skip_serializing)]
+    pub password_hash: String,    // Kept in TypeScript (needed for input)
+}
+```
+
+**TypeScript Output:**
+```typescript
+export interface User {
+  id: number;
+  name: string;
+  passwordHash: string;  // skip_serializing fields are kept
+  // internal_cache is excluded due to #[serde(skip)]
 }
 ```
 
