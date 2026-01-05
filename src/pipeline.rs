@@ -967,7 +967,7 @@ mod tests {
                 RustStruct {
                     name: "User".to_string(),
                     generics: vec![],
-                    fields: vec![StructField { has_explicit_rename: false, use_optional: false,
+                    fields: vec![StructField { has_explicit_rename: false, use_optional: false, is_flatten: false,
                         name: "id".to_string(),
                         ty: RustType::Primitive("i32".to_string()),
                     }],
@@ -976,7 +976,7 @@ mod tests {
                 RustStruct {
                     name: "User".to_string(),
                     generics: vec![],
-                    fields: vec![StructField { has_explicit_rename: false, use_optional: false,
+                    fields: vec![StructField { has_explicit_rename: false, use_optional: false, is_flatten: false,
                         name: "name".to_string(),
                         ty: RustType::Primitive("String".to_string()),
                     }],

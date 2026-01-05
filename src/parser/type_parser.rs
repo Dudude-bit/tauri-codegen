@@ -281,11 +281,15 @@ fn parse_struct(item: &ItemStruct, source_file: &Path) -> Option<RustStruct> {
                 // Check for #[ts(optional)] attribute
                 let use_optional = has_ts_optional(&field.attrs, &field_type);
 
+                // Check for #[serde(flatten)] attribute
+                let is_flatten = has_serde_flatten(&field.attrs);
+
                 Some(StructField {
                     name: final_name,
                     ty: field_type,
                     has_explicit_rename: explicit_rename.is_some(),
                     use_optional,
+                    is_flatten,
                 })
             })
             .collect(),
@@ -300,6 +304,7 @@ fn parse_struct(item: &ItemStruct, source_file: &Path) -> Option<RustStruct> {
                     ty: parse_type_with_context(&field.ty, &generic_params),
                     has_explicit_rename: false,
                     use_optional: false,
+                    is_flatten: false,
                 })
                 .collect()
         }
@@ -391,11 +396,13 @@ fn parse_enum(item: &ItemEnum, source_file: &Path) -> Option<RustEnum> {
                             let explicit_rename = get_serde_rename(&field.attrs);
                             let final_name = explicit_rename.clone().unwrap_or(field_name);
                             let use_optional = has_ts_optional(&field.attrs, &field_type);
+                            let is_flatten = has_serde_flatten(&field.attrs);
                             Some(StructField {
                                 name: final_name,
                                 ty: field_type,
                                 has_explicit_rename: explicit_rename.is_some(),
                                 use_optional,
+                                is_flatten,
                             })
                         })
                         .collect();
@@ -490,6 +497,28 @@ fn has_serde_skip(attrs: &[syn::Attribute]) -> bool {
                     for meta in nested {
                         if let Meta::Path(path) = meta {
                             if path.is_ident("skip") {
+                                return true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Check if a field has #[serde(flatten)] attribute
+fn has_serde_flatten(attrs: &[syn::Attribute]) -> bool {
+    for attr in attrs {
+        if let Meta::List(meta_list) = &attr.meta {
+            if meta_list.path.is_ident("serde") {
+                if let Ok(nested) = meta_list.parse_args_with(
+                    syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated,
+                ) {
+                    for meta in nested {
+                        if let Meta::Path(path) = meta {
+                            if path.is_ident("flatten") {
                                 return true;
                             }
                         }
@@ -1079,5 +1108,94 @@ mod tests {
             }
             other => panic!("Expected Struct variant, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_parse_serde_flatten() {
+        let code = r#"
+            #[derive(Serialize)]
+            pub struct Address {
+                pub city: String,
+                pub country: String,
+            }
+
+            #[derive(Serialize)]
+            pub struct User {
+                pub name: String,
+                #[serde(flatten)]
+                pub address: Address,
+            }
+        "#;
+
+        let (structs, _) = parse_types(code, &test_path()).unwrap();
+        assert_eq!(structs.len(), 2);
+
+        let user = structs.iter().find(|s| s.name == "User").unwrap();
+        assert_eq!(user.fields.len(), 2);
+
+        assert_eq!(user.fields[0].name, "name");
+        assert!(!user.fields[0].is_flatten, "Regular field should not be flattened");
+
+        assert_eq!(user.fields[1].name, "address");
+        assert!(user.fields[1].is_flatten, "Field with #[serde(flatten)] should be flattened");
+    }
+
+    #[test]
+    fn test_parse_multiple_serde_flatten() {
+        let code = r#"
+            #[derive(Serialize)]
+            pub struct Metadata {
+                pub created_at: String,
+            }
+
+            #[derive(Serialize)]
+            pub struct Address {
+                pub city: String,
+            }
+
+            #[derive(Serialize)]
+            pub struct User {
+                pub name: String,
+                #[serde(flatten)]
+                pub address: Address,
+                #[serde(flatten)]
+                pub meta: Metadata,
+            }
+        "#;
+
+        let (structs, _) = parse_types(code, &test_path()).unwrap();
+        let user = structs.iter().find(|s| s.name == "User").unwrap();
+
+        assert_eq!(user.fields.len(), 3);
+        assert!(!user.fields[0].is_flatten); // name
+        assert!(user.fields[1].is_flatten);  // address
+        assert!(user.fields[2].is_flatten);  // meta
+    }
+
+    #[test]
+    fn test_parse_serde_flatten_with_other_attrs() {
+        let code = r#"
+            #[derive(Serialize)]
+            pub struct Inner {
+                pub value: i32,
+            }
+
+            #[derive(Serialize)]
+            pub struct Outer {
+                #[serde(rename = "customName")]
+                pub name: String,
+                #[serde(flatten)]
+                pub inner: Inner,
+            }
+        "#;
+
+        let (structs, _) = parse_types(code, &test_path()).unwrap();
+        let outer = structs.iter().find(|s| s.name == "Outer").unwrap();
+
+        assert_eq!(outer.fields[0].name, "customName");
+        assert!(outer.fields[0].has_explicit_rename);
+        assert!(!outer.fields[0].is_flatten);
+
+        assert!(outer.fields[1].is_flatten);
     }
 }

@@ -155,7 +155,7 @@ fn test_generate_with_naming_prefix() {
             name: "id".to_string(),
             ty: RustType::Primitive("i32".to_string()),
             has_explicit_rename: false,
-            use_optional: false,
+            use_optional: false, is_flatten: false,
         }],
         source_file: PathBuf::from("test.rs"),
     }];
@@ -295,19 +295,19 @@ fn test_snake_case_fields_converted_to_camel_case() {
                 name: "user_id".to_string(),
                 ty: RustType::Primitive("i32".to_string()),
                 has_explicit_rename: false,
-                use_optional: false,
+                use_optional: false, is_flatten: false,
             },
             StructField {
                 name: "first_name".to_string(),
                 ty: RustType::Primitive("String".to_string()),
                 has_explicit_rename: false,
-                use_optional: false,
+                use_optional: false, is_flatten: false,
             },
             StructField {
                 name: "last_login_at".to_string(),
                 ty: RustType::Primitive("DateTime".to_string()),
                 has_explicit_rename: false,
-                use_optional: false,
+                use_optional: false, is_flatten: false,
             },
         ],
         source_file: PathBuf::from("test.rs"),
@@ -340,13 +340,13 @@ fn test_complex_enum_discriminated_union() {
                         name: "x".to_string(),
                         ty: RustType::Primitive("i32".to_string()),
                         has_explicit_rename: false,
-                        use_optional: false,
+                        use_optional: false, is_flatten: false,
                     },
                     StructField {
                         name: "y".to_string(),
                         ty: RustType::Primitive("i32".to_string()),
                         has_explicit_rename: false,
-                        use_optional: false,
+                        use_optional: false, is_flatten: false,
                     },
                 ]),
                 has_explicit_rename: false,
@@ -383,3 +383,207 @@ fn test_complex_enum_discriminated_union() {
     assert!(output.contains("\"Close\""));
 }
 
+#[test]
+fn test_serde_flatten_generates_intersection_type() {
+    // End-to-end test for #[serde(flatten)] support
+    let structs = vec![
+        RustStruct {
+            name: "Address".to_string(),
+            generics: vec![],
+            fields: vec![
+                StructField {
+                    name: "city".to_string(),
+                    ty: RustType::Primitive("String".to_string()),
+                    has_explicit_rename: false,
+                    use_optional: false,
+                    is_flatten: false,
+                },
+                StructField {
+                    name: "country".to_string(),
+                    ty: RustType::Primitive("String".to_string()),
+                    has_explicit_rename: false,
+                    use_optional: false,
+                    is_flatten: false,
+                },
+            ],
+            source_file: PathBuf::from("test.rs"),
+        },
+        RustStruct {
+            name: "User".to_string(),
+            generics: vec![],
+            fields: vec![
+                StructField {
+                    name: "name".to_string(),
+                    ty: RustType::Primitive("String".to_string()),
+                    has_explicit_rename: false,
+                    use_optional: false,
+                    is_flatten: false,
+                },
+                StructField {
+                    name: "address".to_string(),
+                    ty: RustType::Custom("Address".to_string()),
+                    has_explicit_rename: false,
+                    use_optional: false,
+                    is_flatten: true,
+                },
+            ],
+            source_file: PathBuf::from("test.rs"),
+        },
+    ];
+
+    let mut ctx = GeneratorContext::new(NamingConfig::default());
+    ctx.register_type("Address");
+    ctx.register_type("User");
+
+    let output = generate_types_file(&structs, &[], &ctx);
+
+    // Address should be a regular interface
+    assert!(output.contains("export interface Address {"));
+    assert!(output.contains("city: string"));
+    assert!(output.contains("country: string"));
+
+    // User should be a type alias with intersection
+    assert!(output.contains("export type User ="));
+    assert!(output.contains("name: string"));
+    assert!(output.contains("& Address"));
+}
+
+#[test]
+fn test_flatten_type_as_command_return() {
+    // Test that flatten types work correctly as command return types
+    let structs = vec![
+        RustStruct {
+            name: "Address".to_string(),
+            generics: vec![],
+            fields: vec![
+                StructField {
+                    name: "city".to_string(),
+                    ty: RustType::Primitive("String".to_string()),
+                    has_explicit_rename: false,
+                    use_optional: false,
+                    is_flatten: false,
+                },
+            ],
+            source_file: PathBuf::from("test.rs"),
+        },
+        RustStruct {
+            name: "User".to_string(),
+            generics: vec![],
+            fields: vec![
+                StructField {
+                    name: "name".to_string(),
+                    ty: RustType::Primitive("String".to_string()),
+                    has_explicit_rename: false,
+                    use_optional: false,
+                    is_flatten: false,
+                },
+                StructField {
+                    name: "address".to_string(),
+                    ty: RustType::Custom("Address".to_string()),
+                    has_explicit_rename: false,
+                    use_optional: false,
+                    is_flatten: true,
+                },
+            ],
+            source_file: PathBuf::from("test.rs"),
+        },
+    ];
+
+    let commands = vec![TauriCommand {
+        name: "get_user".to_string(),
+        args: vec![],
+        return_type: Some(RustType::Custom("User".to_string())),
+        source_file: PathBuf::from("test.rs"),
+        rename_all: None,
+    }];
+
+    let mut ctx = GeneratorContext::new(NamingConfig::default());
+    ctx.register_type("Address");
+    ctx.register_type("User");
+
+    let types_path = PathBuf::from("./types.ts");
+    let commands_path = PathBuf::from("./commands.ts");
+
+    let types_output = generate_types_file(&structs, &[], &ctx);
+    let commands_output = generate_commands_file(&commands, &types_path, &commands_path, &ctx);
+
+    // Verify types file has intersection type
+    assert!(types_output.contains("export type User ="));
+    assert!(types_output.contains("& Address"));
+
+    // Verify command uses the User type correctly in return
+    assert!(commands_output.contains("Promise<User>"));
+    assert!(commands_output.contains("invoke<User>"));
+}
+
+#[test]
+fn test_flatten_type_as_command_argument() {
+    // Test that flatten types work correctly as command arguments
+    let structs = vec![
+        RustStruct {
+            name: "Metadata".to_string(),
+            generics: vec![],
+            fields: vec![
+                StructField {
+                    name: "timestamp".to_string(),
+                    ty: RustType::Primitive("i64".to_string()),
+                    has_explicit_rename: false,
+                    use_optional: false,
+                    is_flatten: false,
+                },
+            ],
+            source_file: PathBuf::from("test.rs"),
+        },
+        RustStruct {
+            name: "CreateRequest".to_string(),
+            generics: vec![],
+            fields: vec![
+                StructField {
+                    name: "name".to_string(),
+                    ty: RustType::Primitive("String".to_string()),
+                    has_explicit_rename: false,
+                    use_optional: false,
+                    is_flatten: false,
+                },
+                StructField {
+                    name: "meta".to_string(),
+                    ty: RustType::Custom("Metadata".to_string()),
+                    has_explicit_rename: false,
+                    use_optional: false,
+                    is_flatten: true,
+                },
+            ],
+            source_file: PathBuf::from("test.rs"),
+        },
+    ];
+
+    let commands = vec![TauriCommand {
+        name: "create_item".to_string(),
+        args: vec![CommandArg {
+            name: "request".to_string(),
+            ty: RustType::Custom("CreateRequest".to_string()),
+        }],
+        return_type: None,
+        source_file: PathBuf::from("test.rs"),
+        rename_all: None,
+    }];
+
+    let mut ctx = GeneratorContext::new(NamingConfig::default());
+    ctx.register_type("Metadata");
+    ctx.register_type("CreateRequest");
+
+    let types_path = PathBuf::from("./types.ts");
+    let commands_path = PathBuf::from("./commands.ts");
+
+    let types_output = generate_types_file(&structs, &[], &ctx);
+    let commands_output = generate_commands_file(&commands, &types_path, &commands_path, &ctx);
+
+    // Verify types file has intersection type
+    assert!(types_output.contains("export type CreateRequest ="));
+    assert!(types_output.contains("& Metadata"));
+
+    // Verify command uses the CreateRequest type as argument
+    assert!(commands_output.contains("request: CreateRequest"));
+    // Verify import includes CreateRequest
+    assert!(commands_output.contains("CreateRequest"));
+}

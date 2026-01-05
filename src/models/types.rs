@@ -28,6 +28,9 @@ pub struct StructField {
     /// Whether to use undefined instead of null for Option types
     /// Set via #[ts(optional)] attribute
     pub use_optional: bool,
+    /// Whether the field is flattened via #[serde(flatten)]
+    /// If true, the field's type will be intersected with the parent type in TypeScript
+    pub is_flatten: bool,
 }
 
 /// Represents a parsed Rust enum

@@ -55,6 +55,7 @@ fn render_field(field: &crate::models::StructField, ctx: &GeneratorContext) -> (
 }
 
 /// Generate a TypeScript interface from a Rust struct
+/// If the struct has #[serde(flatten)] fields, generate a type alias with intersection
 fn generate_interface(s: &RustStruct, ctx: &GeneratorContext) -> String {
     let mut output = String::new();
 
@@ -67,20 +68,65 @@ fn generate_interface(s: &RustStruct, ctx: &GeneratorContext) -> String {
         format!("<{}>", s.generics.join(", "))
     };
 
-    output.push_str(&format!(
-        "export interface {}{} {{\n",
-        interface_name, generics_str
-    ));
+    // Separate normal fields from flattened fields
+    let (flatten_fields, normal_fields): (Vec<_>, Vec<_>) =
+        s.fields.iter().partition(|f| f.is_flatten);
 
-    for field in &s.fields {
-        let (field_name, optional_marker, ts_type) = render_field(field, ctx);
+    if flatten_fields.is_empty() {
+        // No flatten fields - generate regular interface
         output.push_str(&format!(
-            "  {}{}: {};\n",
-            field_name, optional_marker, ts_type
+            "export interface {}{} {{\n",
+            interface_name, generics_str
         ));
-    }
 
-    output.push_str("}\n");
+        for field in &s.fields {
+            let (field_name, optional_marker, ts_type) = render_field(field, ctx);
+            output.push_str(&format!(
+                "  {}{}: {};\n",
+                field_name, optional_marker, ts_type
+            ));
+        }
+
+        output.push_str("}\n");
+    } else {
+        // Has flatten fields - generate type alias with intersection
+        output.push_str(&format!(
+            "export type {}{} = ",
+            interface_name, generics_str
+        ));
+
+        // Generate inline object for normal fields
+        if normal_fields.is_empty() {
+            // No normal fields, start with first flatten type
+            let mut flatten_types: Vec<String> = flatten_fields
+                .iter()
+                .map(|f| rust_to_typescript(&f.ty, ctx))
+                .collect();
+            output.push_str(&flatten_types.remove(0));
+            for ft in flatten_types {
+                output.push_str(&format!(" & {}", ft));
+            }
+        } else {
+            // Generate inline object for normal fields
+            output.push_str("{\n");
+            for field in normal_fields {
+                let (field_name, optional_marker, ts_type) = render_field(field, ctx);
+                output.push_str(&format!(
+                    "  {}{}: {};\n",
+                    field_name, optional_marker, ts_type
+                ));
+            }
+            output.push('}');
+
+            // Add intersection with flatten types
+            for field in flatten_fields {
+                let ts_type = rust_to_typescript(&field.ty, ctx);
+                output.push_str(&format!(" & {}", ts_type));
+            }
+        }
+
+        output.push_str(";\n");
+    }
 
     output
 }
@@ -250,13 +296,13 @@ mod tests {
             fields: vec![
                 StructField {
                     has_explicit_rename: false,
-                    use_optional: false,
+                    use_optional: false, is_flatten: false,
                     name: "id".to_string(),
                     ty: RustType::Primitive("i32".to_string()),
                 },
                 StructField {
                     has_explicit_rename: false,
-                    use_optional: false,
+                    use_optional: false, is_flatten: false,
                     name: "name".to_string(),
                     ty: RustType::Primitive("String".to_string()),
                 },
@@ -280,13 +326,13 @@ mod tests {
             fields: vec![
                 StructField {
                     has_explicit_rename: false,
-                    use_optional: false,
+                    use_optional: false, is_flatten: false,
                     name: "data".to_string(),
                     ty: RustType::Generic("T".to_string()),
                 },
                 StructField {
                     has_explicit_rename: false,
-                    use_optional: false,
+                    use_optional: false, is_flatten: false,
                     name: "count".to_string(),
                     ty: RustType::Primitive("i32".to_string()),
                 },
@@ -310,13 +356,13 @@ mod tests {
             fields: vec![
                 StructField {
                     has_explicit_rename: false,
-                    use_optional: false,
+                    use_optional: false, is_flatten: false,
                     name: "key".to_string(),
                     ty: RustType::Generic("K".to_string()),
                 },
                 StructField {
                     has_explicit_rename: false,
-                    use_optional: false,
+                    use_optional: false, is_flatten: false,
                     name: "value".to_string(),
                     ty: RustType::Generic("V".to_string()),
                 },
@@ -406,7 +452,7 @@ mod tests {
                     name: "Admin".to_string(),
                     data: VariantData::Struct(vec![StructField {
                         has_explicit_rename: false,
-                        use_optional: false,
+                        use_optional: false, is_flatten: false,
                         name: "permissions".to_string(),
                         ty: RustType::Vec(Box::new(RustType::Primitive("String".to_string()))),
                     }]),
@@ -439,13 +485,13 @@ mod tests {
             fields: vec![
                 StructField {
                     has_explicit_rename: false,
-                    use_optional: false,
+                    use_optional: false, is_flatten: false,
                     name: "user_id".to_string(),
                     ty: RustType::Primitive("i32".to_string()),
                 },
                 StructField {
                     has_explicit_rename: false,
-                    use_optional: false,
+                    use_optional: false, is_flatten: false,
                     name: "first_name".to_string(),
                     ty: RustType::Primitive("String".to_string()),
                 },
@@ -492,7 +538,7 @@ mod tests {
                 generics: vec![],
                 fields: vec![StructField {
                     has_explicit_rename: false,
-                    use_optional: false,
+                    use_optional: false, is_flatten: false,
                     name: "id".to_string(),
                     ty: RustType::Primitive("i32".to_string()),
                 }],
@@ -503,7 +549,7 @@ mod tests {
                 generics: vec![],
                 fields: vec![StructField {
                     has_explicit_rename: false,
-                    use_optional: false,
+                    use_optional: false, is_flatten: false,
                     name: "name".to_string(),
                     ty: RustType::Primitive("String".to_string()),
                 }],
@@ -538,7 +584,7 @@ mod tests {
             generics: vec![],
             fields: vec![StructField {
                 has_explicit_rename: false,
-                use_optional: false,
+                use_optional: false, is_flatten: false,
                 name: "email".to_string(),
                 ty: RustType::Option(Box::new(RustType::Primitive("String".to_string()))),
             }],
@@ -558,7 +604,7 @@ mod tests {
             generics: vec![],
             fields: vec![StructField {
                 has_explicit_rename: false,
-                use_optional: false,
+                use_optional: false, is_flatten: false,
                 name: "tags".to_string(),
                 ty: RustType::Vec(Box::new(RustType::Primitive("String".to_string()))),
             }],
@@ -602,19 +648,19 @@ mod tests {
                     name: "user_name".to_string(), // Should become userName
                     ty: RustType::Primitive("String".to_string()),
                     has_explicit_rename: false,
-                    use_optional: false,
+                    use_optional: false, is_flatten: false,
                 },
                 StructField {
                     name: "API_KEY".to_string(), // Should succeed as API_KEY
                     ty: RustType::Primitive("String".to_string()),
                     has_explicit_rename: true, // Simulate #[serde(rename = "API_KEY")]
-                    use_optional: false,
+                    use_optional: false, is_flatten: false,
                 },
                 StructField {
                     name: "snake_case_kept".to_string(), // Should fail check if it was converted
                     ty: RustType::Primitive("bool".to_string()),
                     has_explicit_rename: true, // Simulate #[serde(rename = "snake_case_kept")]
-                    use_optional: false,
+                    use_optional: false, is_flatten: false,
                 },
             ],
             source_file: test_path(),
@@ -671,13 +717,13 @@ mod tests {
                         name: "user_id".to_string(),
                         ty: RustType::Primitive("i32".to_string()),
                         has_explicit_rename: false, // Normal conversion -> userId
-                        use_optional: false,
+                        use_optional: false, is_flatten: false,
                     },
                     StructField {
                         name: "TIMESTAMP".to_string(),
                         ty: RustType::Primitive("i64".to_string()),
                         has_explicit_rename: true, // Kept as TIMESTAMP
-                        use_optional: false,
+                        use_optional: false, is_flatten: false,
                     },
                 ]),
                 has_explicit_rename: false,
@@ -704,13 +750,13 @@ mod tests {
                     name: "volume".to_string(),
                     ty: RustType::Option(Box::new(RustType::Primitive("f32".to_string()))),
                     has_explicit_rename: false,
-                    use_optional: true,
+                    use_optional: true, is_flatten: false,
                 },
                 StructField {
                     name: "name".to_string(),
                     ty: RustType::Option(Box::new(RustType::Primitive("String".to_string()))),
                     has_explicit_rename: false,
-                    use_optional: false,
+                    use_optional: false, is_flatten: false,
                 },
             ],
             source_file: test_path(),
@@ -721,5 +767,140 @@ mod tests {
 
         assert!(output.contains("volume?: number"));
         assert!(output.contains("name: string | null"));
+    }
+
+    #[test]
+    fn test_generate_interface_with_flatten() {
+        let s = RustStruct {
+            name: "User".to_string(),
+            generics: vec![],
+            fields: vec![
+                StructField {
+                    name: "name".to_string(),
+                    ty: RustType::Primitive("String".to_string()),
+                    has_explicit_rename: false,
+                    use_optional: false,
+                    is_flatten: false,
+                },
+                StructField {
+                    name: "address".to_string(),
+                    ty: RustType::Custom("Address".to_string()),
+                    has_explicit_rename: false,
+                    use_optional: false,
+                    is_flatten: true,
+                },
+            ],
+            source_file: test_path(),
+        };
+
+        let mut ctx = default_ctx();
+        ctx.register_type("Address");
+        let output = generate_interface(&s, &ctx);
+
+        // Should generate type alias with intersection
+        assert!(output.contains("export type User ="), "Should be a type alias, not interface");
+        assert!(output.contains("name: string"), "Should have normal field");
+        assert!(output.contains("& Address"), "Should intersect with Address");
+        assert!(!output.contains("address:"), "Flatten field should not appear as property");
+    }
+
+    #[test]
+    fn test_generate_interface_with_multiple_flatten() {
+        let s = RustStruct {
+            name: "User".to_string(),
+            generics: vec![],
+            fields: vec![
+                StructField {
+                    name: "id".to_string(),
+                    ty: RustType::Primitive("i32".to_string()),
+                    has_explicit_rename: false,
+                    use_optional: false,
+                    is_flatten: false,
+                },
+                StructField {
+                    name: "address".to_string(),
+                    ty: RustType::Custom("Address".to_string()),
+                    has_explicit_rename: false,
+                    use_optional: false,
+                    is_flatten: true,
+                },
+                StructField {
+                    name: "meta".to_string(),
+                    ty: RustType::Custom("Metadata".to_string()),
+                    has_explicit_rename: false,
+                    use_optional: false,
+                    is_flatten: true,
+                },
+            ],
+            source_file: test_path(),
+        };
+
+        let mut ctx = default_ctx();
+        ctx.register_type("Address");
+        ctx.register_type("Metadata");
+        let output = generate_interface(&s, &ctx);
+
+        assert!(output.contains("export type User ="));
+        assert!(output.contains("id: number"));
+        assert!(output.contains("& Address"));
+        assert!(output.contains("& Metadata"));
+    }
+
+    #[test]
+    fn test_generate_interface_only_flatten() {
+        // Edge case: struct with only flatten fields
+        let s = RustStruct {
+            name: "Combined".to_string(),
+            generics: vec![],
+            fields: vec![
+                StructField {
+                    name: "a".to_string(),
+                    ty: RustType::Custom("TypeA".to_string()),
+                    has_explicit_rename: false,
+                    use_optional: false,
+                    is_flatten: true,
+                },
+                StructField {
+                    name: "b".to_string(),
+                    ty: RustType::Custom("TypeB".to_string()),
+                    has_explicit_rename: false,
+                    use_optional: false,
+                    is_flatten: true,
+                },
+            ],
+            source_file: test_path(),
+        };
+
+        let mut ctx = default_ctx();
+        ctx.register_type("TypeA");
+        ctx.register_type("TypeB");
+        let output = generate_interface(&s, &ctx);
+
+        assert!(output.contains("export type Combined = TypeA & TypeB;"));
+    }
+
+    #[test]
+    fn test_generate_interface_without_flatten_remains_interface() {
+        // Verify that structs without flatten still generate interface
+        let s = RustStruct {
+            name: "Simple".to_string(),
+            generics: vec![],
+            fields: vec![
+                StructField {
+                    name: "id".to_string(),
+                    ty: RustType::Primitive("i32".to_string()),
+                    has_explicit_rename: false,
+                    use_optional: false,
+                    is_flatten: false,
+                },
+            ],
+            source_file: test_path(),
+        };
+
+        let ctx = default_ctx();
+        let output = generate_interface(&s, &ctx);
+
+        assert!(output.contains("export interface Simple"), "Should be an interface");
+        assert!(!output.contains("export type Simple"), "Should not be a type alias");
     }
 }
