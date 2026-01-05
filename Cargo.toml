@@ -3,7 +3,7 @@ members = [".", "tauri-ts-generator-derive"]
 
 [package]
 name = "tauri-ts-generator"
-version = "1.7.0"
+version = "1.7.1"
 edition = "2021"
 description = "CLI tool to generate TypeScript bindings from Tauri commands"
 authors = ["kirillinakin <kirillinyakin@yandex.ru>"]

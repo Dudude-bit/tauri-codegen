@@ -12,6 +12,7 @@ A powerful CLI tool to automatically generate TypeScript bindings from your Rust
     - Respects `#[serde(rename = "...")]` attributes, preserving the exact name and overriding camelCase conversion.
     - Handles `#[serde(rename_all = "...")]` for enums and structs.
     - Supports `#[serde(tag = "...")]`, `#[serde(content = "...")]`, and `#[serde(untagged)]` enum representations.
+    - Supports `#[serde(flatten)]` to generate TypeScript intersection types.
     - Fields with `#[serde(skip)]` are excluded from TypeScript output.
     - Support for `#[ts(optional)]` attribute on `Option` fields to generate `prop?: T` instead of `T | null`.
     - Provides `#[derive(tauri_ts_generator::TS)]` to register the `ts` attribute namespace.
@@ -249,6 +250,39 @@ export interface User {
   // internal_cache is excluded due to #[serde(skip)]
 }
 ```
+
+### 7. Serde Flatten (Intersection Types)
+Use `#[serde(flatten)]` to embed one struct's fields into another. The generator produces TypeScript intersection types.
+
+**Rust:**
+```rust
+#[derive(Serialize)]
+pub struct Address {
+    pub city: String,
+    pub country: String,
+}
+
+#[derive(Serialize)]
+pub struct User {
+    pub name: String,
+    #[serde(flatten)]
+    pub address: Address,
+}
+```
+
+**TypeScript Output:**
+```typescript
+export interface Address {
+  city: string;
+  country: string;
+}
+
+export type User = {
+  name: string;
+} & Address;
+```
+
+This works correctly for both command arguments (input) and return types (output).
 
 ## CLI Reference
 
