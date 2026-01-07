@@ -376,8 +376,13 @@ impl Pipeline {
                             to_process.push((original_name, source));
                         }
                     }
-                    ResolutionResult::Ambiguous(_) => {
-                        eprintln!("Warning: Ambiguous type '{}' used in {}", t, type_file.display());
+                    ResolutionResult::Ambiguous(paths) => {
+                        eprintln!(
+                            "Warning: Ambiguous type '{}' used in {}. Found in: {}",
+                            t,
+                            type_file.display(),
+                            paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
+                        );
                     }
                     ResolutionResult::NotFound => {
                         let simple_name = t.split("::").last().unwrap_or(&t).to_string();
