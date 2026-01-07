@@ -78,6 +78,22 @@ impl ModuleResolver {
         Self::default()
     }
 
+    /// Register a type from cargo expand output, but ONLY if it doesn't already exist
+    /// in type_definitions from a real source file.
+    ///
+    /// This prevents the "ambiguous type" bug where types defined in source files
+    /// would get a duplicate entry from cargo-expand, while still allowing
+    /// macro-generated types (that don't exist in source) to be resolved.
+    pub fn register_expanded_type_if_missing(&mut self, type_name: &str, source_path: &Path) {
+        // Only register if this type hasn't been seen in any source file
+        if !self.type_definitions.contains_key(type_name) {
+            self.type_definitions
+                .entry(type_name.to_string())
+                .or_default()
+                .push(source_path.to_path_buf());
+        }
+    }
+
     /// Parse a file and extract its scope (imports, local types, submodules)
     pub fn parse_file(&mut self, path: &Path, content: &str, base_path: &Path) -> Result<()> {
         let syntax = syn::parse_file(content)?;
@@ -1128,21 +1144,16 @@ mod tests {
         // This test verifies the fix for the cargo-expand ambiguity bug.
         //
         // BEFORE THE FIX:
-        // When cargo-expand was used, types were registered twice:
-        // 1. From the actual source file (e.g., src/types.rs)
-        // 2. From cargo-expand output (as <cargo-expand>)
-        // This caused false "Ambiguous type" warnings.
+        // When cargo-expand was used, types were registered unconditionally,
+        // even if they already existed in source files. This caused duplicates.
         //
         // AFTER THE FIX:
-        // The register_expanded_type() method was removed, so types from
-        // cargo-expand are never registered in type_definitions. Only actual
-        // source file types are registered.
-        //
-        // This test simulates the scenario and verifies correct behavior.
+        // register_expanded_type_if_missing() only registers types that DON'T
+        // already exist in source files. Types from source files take priority.
 
         let mut resolver = ModuleResolver::new();
 
-        // Parse the actual source file - this registers the type
+        // Parse the actual source file FIRST - this registers the type
         let types_path = PathBuf::from("src/resources/types.rs");
         let types_code = r#"
             pub struct DeploymentContainerInfo {
@@ -1156,10 +1167,14 @@ mod tests {
         assert_eq!(locations.len(), 1, "Type should be registered only once");
         assert_eq!(locations[0], types_path, "Type should be registered from source file");
 
-        // NOTE: Previously, pipeline.rs would call:
-        //   resolver.register_expanded_type("DeploymentContainerInfo", &PathBuf::from("<cargo-expand>"));
-        // This would add a second entry, causing ambiguity.
-        // That method has been removed, so this can no longer happen.
+        // Now try to register the same type from cargo-expand - should be ignored
+        let expanded_path = PathBuf::from("<cargo-expand>");
+        resolver.register_expanded_type_if_missing("DeploymentContainerInfo", &expanded_path);
+
+        // Type should STILL be registered only once (cargo-expand was ignored)
+        let locations = resolver.type_definitions.get("DeploymentContainerInfo").unwrap();
+        assert_eq!(locations.len(), 1, "Cargo-expand should not duplicate source file types");
+        assert_eq!(locations[0], types_path, "Source file registration should be preserved");
 
         // Simulate another file that USES (not defines) the type
         let workloads_path = PathBuf::from("src/resources/workloads.rs");
@@ -1186,6 +1201,47 @@ mod tests {
                 );
             }
             res => panic!("Expected Found, got {:?}", res),
+        }
+    }
+
+    #[test]
+    fn test_macro_generated_types_can_be_resolved() {
+        // This test verifies that types that ONLY exist in cargo-expand output
+        // (macro-generated types not present in source files) can still be resolved.
+        //
+        // Example: progenitor generates API client structs from OpenAPI specs.
+        // These structs don't exist in source code, only in expanded output.
+
+        let mut resolver = ModuleResolver::new();
+
+        // Parse a source file that does NOT contain MacroGeneratedType
+        let source_path = PathBuf::from("src/commands.rs");
+        let source_code = r#"
+            pub struct NormalType {
+                pub value: i32,
+            }
+        "#;
+        resolver.parse_file(&source_path, source_code, &base_path()).unwrap();
+
+        // MacroGeneratedType doesn't exist in source - verify it's not registered
+        assert!(resolver.type_definitions.get("MacroGeneratedType").is_none());
+
+        // Register a macro-generated type from cargo-expand
+        // This simulates what pipeline.rs does after parsing source files
+        let expanded_path = PathBuf::from("<cargo-expand>");
+        resolver.register_expanded_type_if_missing("MacroGeneratedType", &expanded_path);
+
+        // Now the macro-generated type should be registered
+        let locations = resolver.type_definitions.get("MacroGeneratedType").unwrap();
+        assert_eq!(locations.len(), 1);
+        assert_eq!(locations[0], expanded_path);
+
+        // Resolution should find the macro-generated type
+        match resolver.resolve_type("MacroGeneratedType", &source_path) {
+            ResolutionResult::Found(p) => {
+                assert_eq!(p, expanded_path, "Should resolve to <cargo-expand>");
+            }
+            res => panic!("Expected Found for macro-generated type, got {:?}", res),
         }
     }
 }

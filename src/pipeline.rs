@@ -186,10 +186,14 @@ impl Pipeline {
         let base_path = config.input.source_dir.clone();
         let mut parse_result = ParseResult::new();
 
-        // If we have expanded code, parse types from it first
+        // Store expanded types temporarily - we'll register them AFTER parsing source files
+        let mut expanded_structs = Vec::new();
+        let mut expanded_enums = Vec::new();
+
+        // If we have expanded code, parse types from it (but don't register yet)
         if let Some(code) = expanded_code {
             let expanded_path = PathBuf::from("<cargo-expand>");
-            
+
             // Parse types from expanded code (uses different detection for serde attrs)
             match parse_types_expanded(code, &expanded_path) {
                 Ok((structs, enums)) => {
@@ -200,9 +204,9 @@ impl Pipeline {
                             enums.len()
                         );
                     }
-                    
-                    parse_result.structs.extend(structs);
-                    parse_result.enums.extend(enums);
+
+                    expanded_structs = structs;
+                    expanded_enums = enums;
                 }
                 Err(e) => {
                     eprintln!(
@@ -213,6 +217,7 @@ impl Pipeline {
             }
         }
 
+        // First, parse all source files - this registers types in the resolver
         for file_path in rust_files {
             let content = fs::read_to_string(file_path)
                 .with_context(|| format!("Failed to read file: {}", file_path.display()))?;
@@ -271,6 +276,24 @@ impl Pipeline {
                     );
                 }
             }
+        }
+
+        // Now register cargo-expand types, but ONLY if they don't already exist in source files.
+        // This prevents the "ambiguous type" bug while still allowing macro-generated types
+        // (that don't exist in source) to be resolved.
+        if !expanded_structs.is_empty() || !expanded_enums.is_empty() {
+            let expanded_path = PathBuf::from("<cargo-expand>");
+
+            for s in &expanded_structs {
+                resolver.register_expanded_type_if_missing(&s.name, &expanded_path);
+            }
+            for e in &expanded_enums {
+                resolver.register_expanded_type_if_missing(&e.name, &expanded_path);
+            }
+
+            // Add expanded types to parse result
+            parse_result.structs.extend(expanded_structs);
+            parse_result.enums.extend(expanded_enums);
         }
 
         Ok((parse_result, resolver))
