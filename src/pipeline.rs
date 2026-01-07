@@ -201,14 +201,6 @@ impl Pipeline {
                         );
                     }
                     
-                    // Register types in resolver
-                    for s in &structs {
-                        resolver.register_expanded_type(&s.name, &expanded_path);
-                    }
-                    for e in &enums {
-                        resolver.register_expanded_type(&e.name, &expanded_path);
-                    }
-                    
                     parse_result.structs.extend(structs);
                     parse_result.enums.extend(enums);
                 }
