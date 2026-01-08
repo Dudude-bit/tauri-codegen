@@ -50,9 +50,11 @@ fn render_field(field: &crate::models::StructField, ctx: &GeneratorContext) -> (
         ("", rust_to_typescript(&field.ty, ctx))
     };
 
-    // If serde rename was explicitly set, use the name as-is
-    // Otherwise, convert to camelCase
+    // If serde rename was explicitly set, use the name as-is.
+    // Otherwise, preserve Rust field names when configured, or fall back to camelCase.
     let field_name = if field.has_explicit_rename {
+        field.name.clone()
+    } else if ctx.naming.preserve_field_names {
         field.name.clone()
     } else {
         to_camel_case(&field.name)
@@ -674,6 +676,7 @@ mod tests {
             type_suffix: "".to_string(),
             function_prefix: "".to_string(),
             function_suffix: "".to_string(),
+            preserve_field_names: false,
         });
         let output = generate_interface(&s, &ctx);
 
@@ -717,6 +720,41 @@ mod tests {
         assert!(!output.contains("apiKey: string"));
         assert!(output.contains("snake_case_kept: boolean"));
         assert!(!output.contains("snakeCaseKept: boolean"));
+    }
+
+    #[test]
+    fn test_preserve_field_names_keeps_snake_case() {
+        let s = RustStruct {
+            name: "PortForwardRequest".to_string(),
+            generics: vec![],
+            fields: vec![
+                StructField {
+                    name: "local_port".to_string(),
+                    ty: RustType::Primitive("u16".to_string()),
+                    has_explicit_rename: false,
+                    use_optional: false,
+                    is_flatten: false,
+                },
+                StructField {
+                    name: "auto_reconnect".to_string(),
+                    ty: RustType::Primitive("bool".to_string()),
+                    has_explicit_rename: false,
+                    use_optional: false,
+                    is_flatten: false,
+                },
+            ],
+            source_file: test_path(),
+        };
+
+        let ctx = GeneratorContext::new(NamingConfig {
+            preserve_field_names: true,
+            ..NamingConfig::default()
+        });
+        let output = generate_interface(&s, &ctx);
+
+        assert!(output.contains("local_port: number"));
+        assert!(output.contains("auto_reconnect: boolean"));
+        assert!(!output.contains("localPort: number"));
     }
 
     #[test]

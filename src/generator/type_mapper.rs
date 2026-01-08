@@ -327,6 +327,7 @@ mod tests {
             type_suffix: "".to_string(),
             function_prefix: "".to_string(),
             function_suffix: "".to_string(),
+            preserve_field_names: false,
         });
         ctx.register_type("User");
         let ty = RustType::Custom("User".to_string());
@@ -340,6 +341,7 @@ mod tests {
             type_suffix: "DTO".to_string(),
             function_prefix: "".to_string(),
             function_suffix: "".to_string(),
+            preserve_field_names: false,
         });
         ctx.register_type("User");
         let ty = RustType::Custom("User".to_string());

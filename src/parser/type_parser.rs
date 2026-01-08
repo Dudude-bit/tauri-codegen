@@ -322,6 +322,9 @@ fn has_serde_variant_attrs(item: &ItemEnum) -> bool {
 fn parse_struct(item: &ItemStruct, source_file: &Path) -> Option<RustStruct> {
     let name = item.ident.to_string();
 
+    // Parse container-level serde attributes (like rename_all)
+    let container_attrs = parse_serde_container_attrs(&item.attrs);
+
     // Extract generic type parameters
     let generics: Vec<String> = item
         .generics
@@ -354,7 +357,11 @@ fn parse_struct(item: &ItemStruct, source_file: &Path) -> Option<RustStruct> {
 
                 // Check for serde rename attribute
                 let explicit_rename = get_serde_rename(&field.attrs);
-                let final_name = explicit_rename.clone().unwrap_or(field_name);
+                let final_name = explicit_rename
+                    .clone()
+                    .or_else(|| apply_rename_all(&field_name, &container_attrs.rename_all))
+                    .unwrap_or(field_name);
+                let has_rename = explicit_rename.is_some() || container_attrs.rename_all.is_some();
 
                 // Check for #[ts(optional)] attribute
                 let use_optional = has_ts_optional(&field.attrs, &field_type);
@@ -365,7 +372,7 @@ fn parse_struct(item: &ItemStruct, source_file: &Path) -> Option<RustStruct> {
                 Some(StructField {
                     name: final_name,
                     ty: field_type,
-                    has_explicit_rename: explicit_rename.is_some(),
+                    has_explicit_rename: has_rename,
                     use_optional,
                     is_flatten,
                 })
@@ -956,6 +963,27 @@ mod tests {
         assert!(user.fields[0].has_explicit_rename, "Field with serde rename should have has_explicit_rename = true");
         assert_eq!(user.fields[1].name, "name");
         assert!(!user.fields[1].has_explicit_rename, "Field without serde rename should have has_explicit_rename = false");
+    }
+
+    #[test]
+    fn test_serde_rename_all_on_struct_fields() {
+        let code = r#"
+            #[derive(Serialize)]
+            #[serde(rename_all = "camelCase")]
+            pub struct PortForwardRequest {
+                pub local_port: u16,
+                pub remote_port: u16,
+            }
+        "#;
+
+        let (structs, _) = parse_types(code, &test_path()).unwrap();
+        assert_eq!(structs.len(), 1);
+
+        let request = &structs[0];
+        assert_eq!(request.fields[0].name, "localPort");
+        assert!(request.fields[0].has_explicit_rename);
+        assert_eq!(request.fields[1].name, "remotePort");
+        assert!(request.fields[1].has_explicit_rename);
     }
 
     #[test]

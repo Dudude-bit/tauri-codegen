@@ -165,6 +165,7 @@ fn test_generate_with_naming_prefix() {
         type_suffix: "".to_string(),
         function_prefix: "".to_string(),
         function_suffix: "".to_string(),
+        preserve_field_names: false,
     });
     ctx.register_type("User");
 
@@ -187,6 +188,7 @@ fn test_generate_with_naming_suffix() {
         type_suffix: "DTO".to_string(),
         function_prefix: "".to_string(),
         function_suffix: "".to_string(),
+        preserve_field_names: false,
     });
     ctx.register_type("User");
 
@@ -210,6 +212,7 @@ fn test_generate_command_with_function_prefix_suffix() {
         type_suffix: "".to_string(),
         function_prefix: "api".to_string(),
         function_suffix: "Cmd".to_string(),
+        preserve_field_names: false,
     });
     ctx.register_type("User");
 

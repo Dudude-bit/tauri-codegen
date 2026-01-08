@@ -22,7 +22,7 @@ pub struct StructField {
     pub name: String,
     /// Field type
     pub ty: RustType,
-    /// Whether the name was explicitly set via #[serde(rename = "...")]
+    /// Whether the name was set via serde rename or rename_all
     /// If true, the name should be used as-is without camelCase conversion
     pub has_explicit_rename: bool,
     /// Whether to use undefined instead of null for Option types
@@ -82,7 +82,7 @@ pub struct EnumVariant {
     pub name: String,
     /// Variant data (for tuple/struct variants)
     pub data: VariantData,
-    /// Whether the name was explicitly set via #[serde(rename = "...")]
+    /// Whether the name was set via serde rename or rename_all
     /// If true, the name should be used as-is without transformation
     pub has_explicit_rename: bool,
 }

@@ -52,6 +52,9 @@ pub struct NamingConfig {
     /// Suffix for TypeScript function names
     #[serde(default)]
     pub function_suffix: String,
+    /// Preserve Rust field names for generated TypeScript fields unless serde renames are present
+    #[serde(default)]
+    pub preserve_field_names: bool,
 }
 
 impl Config {
@@ -154,6 +157,7 @@ mod tests {
         );
         assert!(config.naming.type_prefix.is_empty());
         assert!(config.naming.type_suffix.is_empty());
+        assert!(!config.naming.preserve_field_names);
     }
 
     #[test]
@@ -219,6 +223,7 @@ function_suffix = "Cmd"
         assert_eq!(config.naming.type_suffix, "DTO");
         assert_eq!(config.naming.function_prefix, "api");
         assert_eq!(config.naming.function_suffix, "Cmd");
+        assert!(!config.naming.preserve_field_names);
     }
 
     #[test]
@@ -246,6 +251,7 @@ commands_file = "commands.ts"
 
         assert!(config.naming.type_prefix.is_empty());
         assert!(config.naming.type_suffix.is_empty());
+        assert!(!config.naming.preserve_field_names);
     }
 
     #[test]
@@ -310,6 +316,7 @@ commands_file = "commands.ts"
                 type_suffix: "".to_string(),
                 function_prefix: "".to_string(),
                 function_suffix: "".to_string(),
+                preserve_field_names: false,
             },
         };
 
@@ -329,6 +336,7 @@ commands_file = "commands.ts"
         assert!(naming.type_suffix.is_empty());
         assert!(naming.function_prefix.is_empty());
         assert!(naming.function_suffix.is_empty());
+        assert!(!naming.preserve_field_names);
     }
 
     #[test]
@@ -357,4 +365,3 @@ commands_file = "commands.ts"
         assert!(config.input.exclude.is_empty());
     }
 }
-

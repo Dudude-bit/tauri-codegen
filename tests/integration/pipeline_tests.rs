@@ -238,6 +238,7 @@ pub fn get_user(id: i32) -> User {
             type_suffix: "".to_string(),
             function_prefix: "".to_string(),
             function_suffix: "Cmd".to_string(),
+            preserve_field_names: false,
         },
     };
 

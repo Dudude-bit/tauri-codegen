@@ -11,4 +11,4 @@ type_prefix = ""
 type_suffix = ""
 function_prefix = ""
 function_suffix = ""
-
+preserve_field_names = false

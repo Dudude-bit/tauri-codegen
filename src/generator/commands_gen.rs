@@ -494,6 +494,7 @@ mod tests {
             type_suffix: "".to_string(),
             function_prefix: "api".to_string(),
             function_suffix: "".to_string(),
+            preserve_field_names: false,
         });
 
         let output = generate_command_function(&cmd, &ctx);
@@ -515,6 +516,7 @@ mod tests {
             type_suffix: "".to_string(),
             function_prefix: "".to_string(),
             function_suffix: "Cmd".to_string(),
+            preserve_field_names: false,
         });
 
         let output = generate_command_function(&cmd, &ctx);
