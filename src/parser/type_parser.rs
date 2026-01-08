@@ -1,4 +1,6 @@
-use crate::models::{EnumVariant, RustEnum, RustStruct, StructField, VariantData, EnumRepresentation};
+use crate::models::{
+    EnumRepresentation, EnumVariant, RustEnum, RustStruct, RustTypeAlias, StructField, VariantData,
+};
 use crate::utils::{to_camel_case, to_kebab_case, to_screaming_kebab_case, to_screaming_snake_case, to_snake_case};
 use anyhow::Result;
 use std::collections::HashSet;
@@ -20,22 +22,52 @@ struct SerdeContainerAttrs {
     untagged: bool,
 }
 
+/// Parsed types from a Rust file.
+#[derive(Debug, Default, Clone)]
+pub struct ParsedTypes {
+    pub structs: Vec<RustStruct>,
+    pub enums: Vec<RustEnum>,
+    pub aliases: Vec<RustTypeAlias>,
+}
+
 /// Parse a Rust source file and extract structs and enums
 pub fn parse_types(content: &str, source_file: &Path) -> Result<(Vec<RustStruct>, Vec<RustEnum>)> {
-    parse_types_internal(content, source_file, false)
+    let parsed = parse_types_internal(content, source_file, false, false)?;
+    Ok((parsed.structs, parsed.enums))
 }
 
 /// Parse expanded Rust code (from cargo expand) and extract structs and enums
 /// This uses different detection logic since derive macros are already expanded
-pub fn parse_types_expanded(content: &str, source_file: &Path) -> Result<(Vec<RustStruct>, Vec<RustEnum>)> {
-    parse_types_internal(content, source_file, true)
+pub fn parse_types_expanded(
+    content: &str,
+    source_file: &Path,
+) -> Result<(Vec<RustStruct>, Vec<RustEnum>)> {
+    let parsed = parse_types_internal(content, source_file, true, false)?;
+    Ok((parsed.structs, parsed.enums))
+}
+
+/// Parse a Rust source file and extract structs, enums, and type aliases
+pub fn parse_types_with_aliases(content: &str, source_file: &Path) -> Result<ParsedTypes> {
+    parse_types_internal(content, source_file, false, true)
+}
+
+/// Parse expanded Rust code (from cargo expand) and extract structs, enums, and type aliases
+pub fn parse_types_expanded_with_aliases(
+    content: &str,
+    source_file: &Path,
+) -> Result<ParsedTypes> {
+    parse_types_internal(content, source_file, true, true)
 }
 
 /// Internal parsing function
-fn parse_types_internal(content: &str, source_file: &Path, expanded: bool) -> Result<(Vec<RustStruct>, Vec<RustEnum>)> {
+fn parse_types_internal(
+    content: &str,
+    source_file: &Path,
+    expanded: bool,
+    include_all: bool,
+) -> Result<ParsedTypes> {
     let syntax = syn::parse_file(content)?;
-    let mut structs = Vec::new();
-    let mut enums = Vec::new();
+    let mut parsed = ParsedTypes::default();
 
     // For expanded code, first collect all types that have Serialize/Deserialize impls
     let serializable_types = if expanded {
@@ -44,9 +76,16 @@ fn parse_types_internal(content: &str, source_file: &Path, expanded: bool) -> Re
         HashSet::new()
     };
 
-    parse_items(&syntax.items, source_file, expanded, &serializable_types, &mut structs, &mut enums);
+    parse_items(
+        &syntax.items,
+        source_file,
+        expanded,
+        include_all,
+        &serializable_types,
+        &mut parsed,
+    );
 
-    Ok((structs, enums))
+    Ok(parsed)
 }
 
 /// Collect names of all types that have impl Serialize or Deserialize (from cargo expand)
@@ -106,15 +145,17 @@ fn parse_items(
     items: &[Item],
     source_file: &Path,
     expanded: bool,
+    include_all: bool,
     serializable_types: &HashSet<String>,
-    structs: &mut Vec<RustStruct>,
-    enums: &mut Vec<RustEnum>,
+    parsed: &mut ParsedTypes,
 ) {
     for item in items {
         match item {
             Item::Struct(item_struct) => {
                 let name = item_struct.ident.to_string();
-                let should_include = if expanded {
+                let should_include = if include_all {
+                    true
+                } else if expanded {
                     // For expanded code: check impl Serialize/Deserialize OR serde attrs on fields
                     serializable_types.contains(&name) 
                         || is_serializable(&item_struct.attrs) 
@@ -125,13 +166,15 @@ fn parse_items(
                 
                 if should_include {
                     if let Some(s) = parse_struct(item_struct, source_file) {
-                        structs.push(s);
+                        parsed.structs.push(s);
                     }
                 }
             }
             Item::Enum(item_enum) => {
                 let name = item_enum.ident.to_string();
-                let should_include = if expanded {
+                let should_include = if include_all {
+                    true
+                } else if expanded {
                     // For expanded code: check impl Serialize/Deserialize OR serde attrs on variants
                     serializable_types.contains(&name)
                         || is_serializable(&item_enum.attrs) 
@@ -142,19 +185,54 @@ fn parse_items(
                 
                 if should_include {
                     if let Some(e) = parse_enum(item_enum, source_file) {
-                        enums.push(e);
+                        parsed.enums.push(e);
                     }
+                }
+            }
+            Item::Type(item_type) => {
+                if let Some(alias) = parse_alias(item_type, source_file) {
+                    parsed.aliases.push(alias);
                 }
             }
             Item::Mod(module) => {
                 // Also parse types inside modules (recursively)
                 if let Some((_, mod_items)) = &module.content {
-                    parse_items(mod_items, source_file, expanded, serializable_types, structs, enums);
+                    parse_items(
+                        mod_items,
+                        source_file,
+                        expanded,
+                        include_all,
+                        serializable_types,
+                        parsed,
+                    );
                 }
             }
             _ => {}
         }
     }
+}
+
+fn parse_alias(item_type: &syn::ItemType, source_file: &Path) -> Option<RustTypeAlias> {
+    let name = item_type.ident.to_string();
+    let generics: Vec<String> = item_type
+        .generics
+        .params
+        .iter()
+        .filter_map(|param| match param {
+            syn::GenericParam::Type(ty) => Some(ty.ident.to_string()),
+            _ => None,
+        })
+        .collect();
+
+    let generic_params: HashSet<String> = generics.iter().cloned().collect();
+    let target = parse_type_with_context(&item_type.ty, &generic_params);
+
+    Some(RustTypeAlias {
+        name,
+        generics,
+        target,
+        source_file: source_file.to_path_buf(),
+    })
 }
 
 /// Check if a type has Serialize or Deserialize derive attribute
@@ -1056,6 +1134,18 @@ mod tests {
 
         let (structs, _) = super::parse_types(code, &test_path()).unwrap();
         assert_eq!(structs.len(), 0, "Regular parse should not find struct without derive");
+    }
+
+    #[test]
+    fn test_parse_type_alias_with_generics() {
+        let code = r#"
+            pub type Wrapper<T> = Vec<T>;
+        "#;
+
+        let parsed = super::parse_types_with_aliases(code, &test_path()).unwrap();
+        assert_eq!(parsed.aliases.len(), 1);
+        assert_eq!(parsed.aliases[0].name, "Wrapper");
+        assert_eq!(parsed.aliases[0].generics, vec!["T"]);
     }
 
     #[test]

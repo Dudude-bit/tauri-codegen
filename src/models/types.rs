@@ -48,6 +48,19 @@ pub struct RustEnum {
     pub representation: EnumRepresentation,
 }
 
+/// Represents a parsed Rust type alias
+#[derive(Debug, Clone, PartialEq)]
+pub struct RustTypeAlias {
+    /// Name of the alias
+    pub name: String,
+    /// Generic type parameters (e.g., ["T", "U"])
+    pub generics: Vec<String>,
+    /// Alias target type
+    pub target: RustType,
+    /// Source file where the alias was found
+    pub source_file: PathBuf,
+}
+
 /// Represents the serde representation of an enum
 #[derive(Debug, Clone, PartialEq, Default)]
 pub enum EnumRepresentation {
@@ -84,4 +97,3 @@ pub enum VariantData {
     /// Struct variant with named fields
     Struct(Vec<StructField>),
 }
-

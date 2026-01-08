@@ -13,22 +13,25 @@ use crate::generator::{
     commands_gen::generate_commands_file, types_gen::generate_types_file, GeneratorContext,
 };
 use crate::known_types;
-use crate::models::{ParseResult, RustEnum, RustStruct, RustType};
-use crate::parser::{parse_commands, parse_types, parse_types_expanded};
+use crate::models::{ParseResult, RustEnum, RustStruct, RustType, RustTypeAlias};
+use crate::parser::{
+    parse_commands, parse_types_expanded_with_aliases, parse_types_with_aliases, ParsedTypes,
+};
 use crate::resolver::{ModuleResolver, ResolutionResult};
 use crate::scanner::Scanner;
 
 /// Result of type collection with potential conflicts
 pub struct TypeCollectionResult {
-    /// Successfully resolved types: name (as used in code) -> source file
-    pub resolved: HashMap<String, PathBuf>,
+    /// Collected structs reachable from command signatures
+    pub structs: Vec<RustStruct>,
+    /// Collected enums reachable from command signatures
+    pub enums: Vec<RustEnum>,
+    /// Collected type aliases reachable from command signatures
+    pub aliases: Vec<RustTypeAlias>,
     /// Conflicts: type name -> list of conflicting source files
     pub conflicts: HashMap<String, Vec<PathBuf>>,
     /// Unresolved types: type name -> file where it was used
     pub unresolved: HashMap<String, PathBuf>,
-    /// Alias mappings: alias name (as used) -> original struct name (in source)
-    /// This is needed for pub use X as Y re-exports
-    pub alias_to_original: HashMap<String, String>,
 }
 
 /// Main pipeline for code generation
@@ -62,13 +65,15 @@ impl Pipeline {
         };
 
         // Step 2: Parse all files and build resolver
-        let (mut parse_result, resolver) = self.parse_files(&rust_files, config, expanded_code.as_deref())?;
+        let (mut parse_result, resolver, expanded_types) =
+            self.parse_files(&rust_files, config, expanded_code.as_deref())?;
 
         // Step 2.5: Filter out Tauri special types (State, Window, etc.) including aliases
         self.filter_tauri_special_args(&mut parse_result.commands, &resolver);
 
         // Step 3: Collect and resolve types used in commands
-        let type_collection = self.collect_used_types(&parse_result, &resolver);
+        let type_collection =
+            self.collect_reachable_types(&parse_result.commands, &resolver, expanded_types.as_ref());
 
         // Step 4: Check for conflicts
         if !type_collection.conflicts.is_empty() {
@@ -104,20 +109,23 @@ impl Pipeline {
             }
         }
 
-        // Step 5: Filter types based on resolution (including aliased types)
-        let (filtered_structs, filtered_enums) =
-            self.filter_types(&parse_result, &type_collection);
-
         // Summary
         println!(
-            "Parsed {} commands, {} structs (used), {} enums (used)",
+            "Parsed {} commands, {} structs (used), {} enums (used), {} aliases (used)",
             parse_result.commands.len(),
-            filtered_structs.len(),
-            filtered_enums.len()
+            type_collection.structs.len(),
+            type_collection.enums.len(),
+            type_collection.aliases.len()
         );
 
         // Step 6: Generate TypeScript files
-        self.generate_output(config, &parse_result, &filtered_structs, &filtered_enums)?;
+        self.generate_output(
+            config,
+            &parse_result,
+            &type_collection.structs,
+            &type_collection.enums,
+            &type_collection.aliases,
+        )?;
 
         println!("Done!");
 
@@ -181,32 +189,30 @@ impl Pipeline {
         rust_files: &[PathBuf],
         config: &Config,
         expanded_code: Option<&str>,
-    ) -> Result<(ParseResult, ModuleResolver)> {
+    ) -> Result<(ParseResult, ModuleResolver, Option<ParsedTypes>)> {
         let mut resolver = ModuleResolver::new();
         let base_path = config.input.source_dir.clone();
         let mut parse_result = ParseResult::new();
 
         // Store expanded types temporarily - we'll register them AFTER parsing source files
-        let mut expanded_structs = Vec::new();
-        let mut expanded_enums = Vec::new();
+        let mut expanded_types: Option<ParsedTypes> = None;
 
         // If we have expanded code, parse types from it (but don't register yet)
         if let Some(code) = expanded_code {
             let expanded_path = PathBuf::from("<cargo-expand>");
 
-            // Parse types from expanded code (uses different detection for serde attrs)
-            match parse_types_expanded(code, &expanded_path) {
-                Ok((structs, enums)) => {
+            match parse_types_expanded_with_aliases(code, &expanded_path) {
+                Ok(parsed) => {
                     if self.verbose {
                         eprintln!(
-                            "Info: Found {} structs and {} enums from cargo expand",
-                            structs.len(),
-                            enums.len()
+                            "Info: Found {} structs, {} enums, {} aliases from cargo expand",
+                            parsed.structs.len(),
+                            parsed.enums.len(),
+                            parsed.aliases.len()
                         );
                     }
 
-                    expanded_structs = structs;
-                    expanded_enums = enums;
+                    expanded_types = Some(parsed);
                 }
                 Err(e) => {
                     eprintln!(
@@ -254,108 +260,149 @@ impl Pipeline {
                 }
             }
 
-            // Parse types
-            match parse_types(&content, file_path) {
-                Ok((structs, enums)) => {
-                    if self.verbose && (!structs.is_empty() || !enums.is_empty()) {
-                        println!(
-                            "Found {} structs and {} enums in {}",
-                            structs.len(),
-                            enums.len(),
-                            file_path.display()
-                        );
-                    }
-                    parse_result.structs.extend(structs);
-                    parse_result.enums.extend(enums);
-                }
-                Err(e) => {
-                    eprintln!(
-                        "Warning: Failed to parse types in {}: {}",
-                        file_path.display(),
-                        e
-                    );
-                }
-            }
         }
 
         // Now register cargo-expand types, but ONLY if they don't already exist in source files.
         // This prevents the "ambiguous type" bug while still allowing macro-generated types
         // (that don't exist in source) to be resolved.
-        if !expanded_structs.is_empty() || !expanded_enums.is_empty() {
+        if let Some(parsed) = &expanded_types {
             let expanded_path = PathBuf::from("<cargo-expand>");
 
-            for s in &expanded_structs {
+            for s in &parsed.structs {
                 resolver.register_expanded_type_if_missing(&s.name, &expanded_path);
             }
-            for e in &expanded_enums {
+            for e in &parsed.enums {
                 resolver.register_expanded_type_if_missing(&e.name, &expanded_path);
             }
-
-            // Add expanded types to parse result
-            parse_result.structs.extend(expanded_structs);
-            parse_result.enums.extend(expanded_enums);
+            for alias in &parsed.aliases {
+                resolver.register_expanded_type_if_missing(&alias.name, &expanded_path);
+            }
         }
 
-        Ok((parse_result, resolver))
+        Ok((parse_result, resolver, expanded_types))
     }
 
-    /// Step 3: Collect all types used in commands, resolving their source files
-    fn collect_used_types(
+    /// Step 3: Collect types reachable from command signatures
+    fn collect_reachable_types(
         &self,
-        parse_result: &ParseResult,
+        commands: &[crate::models::TauriCommand],
         resolver: &ModuleResolver,
+        expanded_types: Option<&ParsedTypes>,
     ) -> TypeCollectionResult {
         let mut resolved_types: HashMap<String, PathBuf> = HashMap::new();
         let mut conflicts: HashMap<String, Vec<PathBuf>> = HashMap::new();
-        let mut unresolved_types: HashMap<String, PathBuf> = HashMap::new();
-        let mut alias_mappings: HashMap<String, String> = HashMap::new();
+        let mut unresolved: HashMap<String, PathBuf> = HashMap::new();
+        let mut parsed_files: HashMap<PathBuf, ParsedTypes> = HashMap::new();
+        let mut structs: Vec<RustStruct> = Vec::new();
+        let mut enums: Vec<RustEnum> = Vec::new();
+        let mut aliases: Vec<RustTypeAlias> = Vec::new();
+        let mut seen_structs: HashSet<(String, PathBuf)> = HashSet::new();
+        let mut seen_enums: HashSet<(String, PathBuf)> = HashSet::new();
+        let mut seen_aliases: HashSet<String> = HashSet::new();
+        let mut reexport_aliases: HashMap<String, (String, PathBuf)> = HashMap::new();
+        let mut to_process: Vec<(String, PathBuf)> = Vec::new();
+        let mut processed: HashSet<(String, PathBuf)> = HashSet::new();
+        let expanded_path = PathBuf::from("<cargo-expand>");
 
-        // Build lookup maps: (name, source_file) -> type
-        let struct_by_file: HashMap<(&str, &Path), &RustStruct> = parse_result
-            .structs
-            .iter()
-            .map(|s| ((s.name.as_str(), s.source_file.as_path()), s))
-            .collect();
-        let enum_by_file: HashMap<(&str, &Path), &RustEnum> = parse_result
-            .enums
-            .iter()
-            .map(|e| ((e.name.as_str(), e.source_file.as_path()), e))
-            .collect();
+        if let Some(parsed) = expanded_types {
+            parsed_files.insert(expanded_path.clone(), parsed.clone());
+        }
 
-        // Collect types from all commands, resolving source files
-        for cmd in &parse_result.commands {
-            let cmd_file = &cmd.source_file;
-
-            for arg in &cmd.args {
-                self.collect_types_with_resolver(
-                    &arg.ty,
-                    cmd_file,
-                    resolver,
-                    &mut resolved_types,
-                    &mut conflicts,
-                    &mut unresolved_types,
-                    &mut alias_mappings,
-                );
-            }
-            if let Some(ref ret_type) = cmd.return_type {
-                self.collect_types_with_resolver(
-                    ret_type,
-                    cmd_file,
-                    resolver,
-                    &mut resolved_types,
-                    &mut conflicts,
-                    &mut unresolved_types,
-                    &mut alias_mappings,
-                );
+        fn add_conflict_path(
+            name: &str,
+            path: &PathBuf,
+            conflicts: &mut HashMap<String, Vec<PathBuf>>,
+        ) {
+            let entry = conflicts.entry(name.to_string()).or_insert_with(Vec::new);
+            if !entry.contains(path) {
+                entry.push(path.clone());
             }
         }
 
-        // Recursively add nested types
-        let mut to_process: Vec<(String, PathBuf)> = resolved_types
-            .iter()
-            .map(|(name, path)| (name.clone(), path.clone()))
-            .collect();
-        let mut processed: HashSet<(String, PathBuf)> = HashSet::new();
+        fn resolve_and_enqueue(
+            type_name: &str,
+            from_file: &Path,
+            resolver: &ModuleResolver,
+            resolved_types: &mut HashMap<String, PathBuf>,
+            conflicts: &mut HashMap<String, Vec<PathBuf>>,
+            unresolved: &mut HashMap<String, PathBuf>,
+            to_process: &mut Vec<(String, PathBuf)>,
+            reexport_aliases: &mut HashMap<String, (String, PathBuf)>,
+        ) {
+            match resolver.resolve_type(type_name, from_file) {
+                ResolutionResult::Found(source) => {
+                    let simple_name = type_name.split("::").last().unwrap_or(type_name).to_string();
+                    if let Some(existing) = resolved_types.get(&simple_name) {
+                        if existing != &source {
+                            add_conflict_path(&simple_name, existing, conflicts);
+                            add_conflict_path(&simple_name, &source, conflicts);
+                        }
+                    } else {
+                        resolved_types.insert(simple_name.clone(), source.clone());
+                        to_process.push((simple_name, source));
+                    }
+                }
+                ResolutionResult::FoundWithAlias(source, original_name) => {
+                    let alias_name = type_name.split("::").last().unwrap_or(type_name).to_string();
+                    if let Some(existing) = resolved_types.get(&alias_name) {
+                        if existing != &source {
+                            add_conflict_path(&alias_name, existing, conflicts);
+                            add_conflict_path(&alias_name, &source, conflicts);
+                        }
+                    } else {
+                        resolved_types.insert(alias_name.clone(), source.clone());
+                    }
+                    reexport_aliases
+                        .entry(alias_name)
+                        .or_insert_with(|| (original_name.clone(), source.clone()));
+                    to_process.push((original_name, source));
+                }
+                ResolutionResult::Ambiguous(paths) => {
+                    let simple_name = type_name.split("::").last().unwrap_or(type_name).to_string();
+                    for path in paths {
+                        add_conflict_path(&simple_name, &path, conflicts);
+                    }
+                }
+                ResolutionResult::NotFound => {
+                    let simple_name = type_name.split("::").last().unwrap_or(type_name).to_string();
+                    unresolved
+                        .entry(simple_name)
+                        .or_insert_with(|| from_file.to_path_buf());
+                }
+            }
+        }
+
+        for cmd in commands {
+            let cmd_file = &cmd.source_file;
+            for arg in &cmd.args {
+                for t in collect_custom_types_from_rust_type(&arg.ty) {
+                    resolve_and_enqueue(
+                        &t,
+                        cmd_file,
+                        resolver,
+                        &mut resolved_types,
+                        &mut conflicts,
+                        &mut unresolved,
+                        &mut to_process,
+                        &mut reexport_aliases,
+                    );
+                }
+            }
+            if let Some(ref ret_type) = cmd.return_type {
+                for t in collect_custom_types_from_rust_type(ret_type) {
+                    resolve_and_enqueue(
+                        &t,
+                        cmd_file,
+                        resolver,
+                        &mut resolved_types,
+                        &mut conflicts,
+                        &mut unresolved,
+                        &mut to_process,
+                        &mut reexport_aliases,
+                    );
+                }
+            }
+        }
 
         while let Some((type_name, type_file)) = to_process.pop() {
             let key = (type_name.clone(), type_file.clone());
@@ -364,61 +411,66 @@ impl Pipeline {
             }
             processed.insert(key);
 
-            // Helper closure to process a nested type
-            let mut process_nested_type = |t: String| {
-                match resolver.resolve_type(&t, &type_file) {
-                    ResolutionResult::Found(source) => {
-                        let simple_name = t.split("::").last().unwrap_or(&t).to_string();
-                        if let Some(existing) = resolved_types.get(&simple_name) {
-                            if existing != &source {
-                                let conflict_list = conflicts
-                                    .entry(simple_name.clone())
-                                    .or_insert_with(|| vec![existing.clone()]);
-                                if !conflict_list.contains(&source) {
-                                    conflict_list.push(source);
-                                }
-                            }
-                        } else {
-                            resolved_types.insert(simple_name.clone(), source.clone());
-                            to_process.push((simple_name, source));
+            if type_file != expanded_path && !parsed_files.contains_key(&type_file) {
+                match fs::read_to_string(&type_file) {
+                    Ok(content) => match parse_types_with_aliases(&content, &type_file) {
+                        Ok(parsed) => {
+                            parsed_files.insert(type_file.clone(), parsed);
                         }
-                    }
-                    ResolutionResult::FoundWithAlias(source, original_name) => {
-                        let alias_name = t.split("::").last().unwrap_or(&t).to_string();
-                        if !resolved_types.contains_key(&alias_name) {
-                            resolved_types.insert(alias_name.clone(), source.clone());
-                            alias_mappings.insert(alias_name.clone(), original_name.clone());
-                            to_process.push((original_name, source));
+                        Err(e) => {
+                            eprintln!(
+                                "Warning: Failed to parse types in {}: {}",
+                                type_file.display(),
+                                e
+                            );
+                            continue;
                         }
-                    }
-                    ResolutionResult::Ambiguous(paths) => {
+                    },
+                    Err(e) => {
                         eprintln!(
-                            "Warning: Ambiguous type '{}' used in {}. Found in: {}",
-                            t,
+                            "Warning: Failed to read file for types {}: {}",
                             type_file.display(),
-                            paths.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(", ")
+                            e
                         );
-                    }
-                    ResolutionResult::NotFound => {
-                        let simple_name = t.split("::").last().unwrap_or(&t).to_string();
-                        unresolved_types.insert(simple_name, type_file.clone());
-                    }
-                }
-            };
-
-            // Check if it's a struct in this file
-            if let Some(s) = struct_by_file.get(&(type_name.as_str(), type_file.as_path())) {
-                for field in &s.fields {
-                    for t in collect_custom_types_from_rust_type(&field.ty) {
-                        process_nested_type(t);
+                        continue;
                     }
                 }
             }
 
-            // Check if it's an enum in this file
-            if let Some(e) = enum_by_file.get(&(type_name.as_str(), type_file.as_path())) {
+            let parsed = match parsed_files.get(&type_file) {
+                Some(parsed) => parsed,
+                None => continue,
+            };
+
+            if let Some(s) = parsed.structs.iter().find(|s| s.name == type_name) {
+                if seen_structs.insert((s.name.clone(), type_file.clone())) {
+                    structs.push(s.clone());
+                }
+
+                for field in &s.fields {
+                    for t in collect_custom_types_from_rust_type(&field.ty) {
+                        resolve_and_enqueue(
+                            &t,
+                            &type_file,
+                            resolver,
+                            &mut resolved_types,
+                            &mut conflicts,
+                            &mut unresolved,
+                            &mut to_process,
+                            &mut reexport_aliases,
+                        );
+                    }
+                }
+                continue;
+            }
+
+            if let Some(e) = parsed.enums.iter().find(|e| e.name == type_name) {
+                if seen_enums.insert((e.name.clone(), type_file.clone())) {
+                    enums.push(e.clone());
+                }
+
                 for variant in &e.variants {
-                    let nested_names = match &variant.data {
+                    let nested = match &variant.data {
                         crate::models::VariantData::Unit => vec![],
                         crate::models::VariantData::Tuple(types) => types
                             .iter()
@@ -429,169 +481,80 @@ impl Pipeline {
                             .flat_map(|f| collect_custom_types_from_rust_type(&f.ty))
                             .collect(),
                     };
-                    for t in nested_names {
-                        process_nested_type(t);
+                    for t in nested {
+                        resolve_and_enqueue(
+                            &t,
+                            &type_file,
+                            resolver,
+                            &mut resolved_types,
+                            &mut conflicts,
+                            &mut unresolved,
+                            &mut to_process,
+                            &mut reexport_aliases,
+                        );
                     }
                 }
+                continue;
             }
+
+            if let Some(alias) = parsed.aliases.iter().find(|a| a.name == type_name) {
+                if seen_aliases.insert(alias.name.clone()) {
+                    aliases.push(alias.clone());
+                }
+
+                for t in collect_custom_types_from_rust_type(&alias.target) {
+                    resolve_and_enqueue(
+                        &t,
+                        &alias.source_file,
+                        resolver,
+                        &mut resolved_types,
+                        &mut conflicts,
+                        &mut unresolved,
+                        &mut to_process,
+                        &mut reexport_aliases,
+                    );
+                }
+            }
+        }
+
+        for (alias_name, (original_name, source_file)) in reexport_aliases {
+            if seen_aliases.contains(&alias_name) {
+                continue;
+            }
+
+            let generics = parsed_files
+                .get(&source_file)
+                .and_then(|parsed| {
+                    parsed
+                        .structs
+                        .iter()
+                        .find(|s| s.name == original_name)
+                        .map(|s| s.generics.clone())
+                        .or_else(|| {
+                            parsed
+                                .enums
+                                .iter()
+                                .find(|e| e.name == original_name)
+                                .map(|e| e.generics.clone())
+                        })
+                })
+                .unwrap_or_default();
+
+            aliases.push(RustTypeAlias {
+                name: alias_name,
+                generics,
+                target: RustType::Custom(original_name),
+                source_file,
+            });
         }
 
         TypeCollectionResult {
-            resolved: resolved_types,
+            structs,
+            enums,
+            aliases,
             conflicts,
-            unresolved: unresolved_types,
-            alias_to_original: alias_mappings,
+            unresolved,
         }
-    }
-
-    /// Collect types from RustType, resolving source files via resolver
-    #[allow(clippy::too_many_arguments)]
-    fn collect_types_with_resolver(
-        &self,
-        ty: &RustType,
-        from_file: &Path,
-        resolver: &ModuleResolver,
-        resolved: &mut HashMap<String, PathBuf>,
-        conflicts: &mut HashMap<String, Vec<PathBuf>>,
-        unresolved: &mut HashMap<String, PathBuf>,
-        alias_mappings: &mut HashMap<String, String>,
-    ) {
-        match ty {
-            RustType::Custom(name) => {
-                match resolver.resolve_type(name, from_file) {
-                    ResolutionResult::Found(source) => {
-                        let simple_name = name.split("::").last().unwrap_or(name).to_string();
-                        if let Some(existing) = resolved.get(&simple_name) {
-                            // Check for conflict: same name, different source file
-                            if existing != &source {
-                                let conflict_list = conflicts
-                                    .entry(simple_name.clone())
-                                    .or_insert_with(|| vec![existing.clone()]);
-                                if !conflict_list.contains(&source) {
-                                    conflict_list.push(source);
-                                }
-                            }
-                        } else {
-                            resolved.insert(simple_name, source);
-                        }
-                    }
-                    ResolutionResult::FoundWithAlias(source, original_name) => {
-                        // This is a type accessed via alias (pub use X as Y)
-                        let alias_name = name.split("::").last().unwrap_or(name).to_string();
-                        if !resolved.contains_key(&alias_name) {
-                            resolved.insert(alias_name.clone(), source);
-                            // Record the mapping from alias to original name
-                            alias_mappings.insert(alias_name, original_name);
-                        }
-                    }
-                    ResolutionResult::Ambiguous(paths) => {
-                        eprintln!("Warning: Ambiguous type '{}' in {}. Found in: {:?}", name, from_file.display(), paths);
-                    }
-                    ResolutionResult::NotFound => {
-                        // Track unresolved types (likely macro-generated)
-                        let simple_name = name.split("::").last().unwrap_or(name).to_string();
-                        unresolved.insert(simple_name, from_file.to_path_buf());
-                    }
-                }
-            }
-            RustType::Vec(inner) => {
-                self.collect_types_with_resolver(inner, from_file, resolver, resolved, conflicts, unresolved, alias_mappings)
-            }
-            RustType::Option(inner) => {
-                self.collect_types_with_resolver(inner, from_file, resolver, resolved, conflicts, unresolved, alias_mappings)
-            }
-            RustType::Result(ok) => {
-                self.collect_types_with_resolver(ok, from_file, resolver, resolved, conflicts, unresolved, alias_mappings)
-            }
-            RustType::HashMap { key, value } => {
-                self.collect_types_with_resolver(key, from_file, resolver, resolved, conflicts, unresolved, alias_mappings);
-                self.collect_types_with_resolver(value, from_file, resolver, resolved, conflicts, unresolved, alias_mappings);
-            }
-            RustType::Tuple(tuple_types) => {
-                for t in tuple_types {
-                    self.collect_types_with_resolver(t, from_file, resolver, resolved, conflicts, unresolved, alias_mappings);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// Step 5: Filter structs and enums based on resolved types
-    fn filter_types(
-        &self,
-        parse_result: &ParseResult,
-        type_collection: &TypeCollectionResult,
-    ) -> (Vec<RustStruct>, Vec<RustEnum>) {
-        let used_types = &type_collection.resolved;
-        let alias_mappings = &type_collection.alias_to_original;
-        
-        let mut filtered_structs: Vec<RustStruct> = Vec::new();
-        let mut seen_struct_names: HashSet<String> = HashSet::new();
-
-        // First pass: add structs by their original names
-        for s in parse_result.structs.iter() {
-            if seen_struct_names.contains(&s.name) {
-                continue;
-            }
-
-            // Only include if this specific struct (by name AND source file) was resolved
-            if let Some(resolved_file) = used_types.get(&s.name) {
-                if &s.source_file == resolved_file {
-                    seen_struct_names.insert(s.name.clone());
-                    filtered_structs.push(s.clone());
-                }
-            }
-        }
-
-        // Second pass: add aliased structs from cargo-expand
-        // For each alias -> original mapping, find the original struct and create an alias copy
-        for (alias_name, original_name) in alias_mappings {
-            if seen_struct_names.contains(alias_name) {
-                continue;
-            }
-            
-            // Find the original struct
-            if let Some(original_struct) = parse_result.structs.iter().find(|s| &s.name == original_name) {
-                // Create a copy with the alias name
-                let mut aliased_struct = original_struct.clone();
-                aliased_struct.name = alias_name.clone();
-                seen_struct_names.insert(alias_name.clone());
-                filtered_structs.push(aliased_struct);
-            }
-        }
-
-        let mut filtered_enums: Vec<RustEnum> = Vec::new();
-        let mut seen_enum_names: HashSet<String> = HashSet::new();
-
-        for e in parse_result.enums.iter() {
-            if seen_enum_names.contains(&e.name) {
-                continue;
-            }
-
-            // Only include if this specific enum (by name AND source file) was resolved
-            if let Some(resolved_file) = used_types.get(&e.name) {
-                if &e.source_file == resolved_file {
-                    seen_enum_names.insert(e.name.clone());
-                    filtered_enums.push(e.clone());
-                }
-            }
-        }
-
-        // Add aliased enums from cargo-expand
-        for (alias_name, original_name) in alias_mappings {
-            if seen_enum_names.contains(alias_name) {
-                continue;
-            }
-            
-            if let Some(original_enum) = parse_result.enums.iter().find(|e| &e.name == original_name) {
-                let mut aliased_enum = original_enum.clone();
-                aliased_enum.name = alias_name.clone();
-                seen_enum_names.insert(alias_name.clone());
-                filtered_enums.push(aliased_enum);
-            }
-        }
-
-        (filtered_structs, filtered_enums)
     }
 
     /// Step 6: Generate TypeScript output files
@@ -601,6 +564,7 @@ impl Pipeline {
         parse_result: &ParseResult,
         filtered_structs: &[RustStruct],
         filtered_enums: &[RustEnum],
+        aliases: &[RustTypeAlias],
     ) -> Result<()> {
         // Ensure output directories exist before writing files
         config.ensure_output_directories()?;
@@ -614,9 +578,12 @@ impl Pipeline {
         for e in filtered_enums {
             ctx.register_type(&e.name);
         }
+        for alias in aliases {
+            ctx.register_type(&alias.name);
+        }
 
         // Generate types.ts
-        let types_content = generate_types_file(filtered_structs, filtered_enums, &ctx);
+        let types_content = generate_types_file(filtered_structs, filtered_enums, aliases, &ctx);
 
         fs::write(&config.output.types_file, &types_content).with_context(|| {
             format!(
@@ -719,7 +686,7 @@ fn collect_custom_types_recursive(ty: &RustType, types: &mut HashSet<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{CommandArg, EnumRepresentation, EnumVariant, StructField, TauriCommand, VariantData};
+    use crate::models::{CommandArg, TauriCommand};
 
     fn test_path() -> PathBuf {
         PathBuf::from("test.rs")
@@ -800,255 +767,113 @@ mod tests {
         assert_eq!(types, vec!["User"]);
     }
 
-    /// Helper to create a simple TypeCollectionResult for testing
-    fn make_type_collection(resolved: HashMap<String, PathBuf>) -> TypeCollectionResult {
-        TypeCollectionResult {
-            resolved,
-            conflicts: HashMap::new(),
-            unresolved: HashMap::new(),
-            alias_to_original: HashMap::new(),
+    fn write_file(path: &std::path::Path, content: &str) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
         }
+        std::fs::write(path, content).unwrap();
     }
 
     #[test]
-    fn test_filter_types_includes_used() {
+    fn test_collect_reachable_types_from_commands() {
         let pipeline = Pipeline::new(false);
+        let temp_dir = tempfile::tempdir().unwrap();
+        let src_dir = temp_dir.path().join("src");
 
-        let parse_result = ParseResult {
-            commands: vec![],
-            structs: vec![
-                RustStruct {
-                    name: "User".to_string(),
-                    generics: vec![],
-                    fields: vec![],
-                    source_file: PathBuf::from("src/types.rs"),
-                },
-                RustStruct {
-                    name: "Item".to_string(),
-                    generics: vec![],
-                    fields: vec![],
-                    source_file: PathBuf::from("src/types.rs"),
-                },
-            ],
-            enums: vec![],
-        };
-
-        let mut used_types = HashMap::new();
-        used_types.insert("User".to_string(), PathBuf::from("src/types.rs"));
-
-        let (filtered_structs, _) = pipeline.filter_types(&parse_result, &make_type_collection(used_types));
-
-        assert_eq!(filtered_structs.len(), 1);
-        assert_eq!(filtered_structs[0].name, "User");
-    }
-
-    #[test]
-    fn test_filter_types_excludes_unused() {
-        let pipeline = Pipeline::new(false);
-
-        let parse_result = ParseResult {
-            commands: vec![],
-            structs: vec![RustStruct {
-                name: "UnusedType".to_string(),
-                generics: vec![],
-                fields: vec![],
-                source_file: test_path(),
-            }],
-            enums: vec![],
-        };
-
-        let used_types = HashMap::new(); // Empty - no types used
-
-        let (filtered_structs, _) = pipeline.filter_types(&parse_result, &make_type_collection(used_types));
-
-        assert!(filtered_structs.is_empty());
-    }
-
-    #[test]
-    fn test_filter_types_respects_source_file() {
-        let pipeline = Pipeline::new(false);
-
-        let parse_result = ParseResult {
-            commands: vec![],
-            structs: vec![
-                RustStruct {
-                    name: "User".to_string(),
-                    generics: vec![],
-                    fields: vec![],
-                    source_file: PathBuf::from("src/a.rs"),
-                },
-                RustStruct {
-                    name: "User".to_string(),
-                    generics: vec![],
-                    fields: vec![],
-                    source_file: PathBuf::from("src/b.rs"),
-                },
-            ],
-            enums: vec![],
-        };
-
-        let mut used_types = HashMap::new();
-        // Only src/a.rs version is used
-        used_types.insert("User".to_string(), PathBuf::from("src/a.rs"));
-
-        let (filtered_structs, _) = pipeline.filter_types(&parse_result, &make_type_collection(used_types));
-
-        assert_eq!(filtered_structs.len(), 1);
-        assert_eq!(filtered_structs[0].source_file, PathBuf::from("src/a.rs"));
-    }
-
-    #[test]
-    fn test_filter_enums() {
-        let pipeline = Pipeline::new(false);
-
-        let parse_result = ParseResult {
-            commands: vec![],
-            structs: vec![],
-            enums: vec![
-                RustEnum {
-                    name: "Status".to_string(),
-                    generics: vec![],
-                    variants: vec![EnumVariant { has_explicit_rename: false,
-                        name: "Active".to_string(),
-                        data: VariantData::Unit,
-                    }],
-                    source_file: PathBuf::from("src/types.rs"),
-                    representation: EnumRepresentation::default(),
-                },
-                RustEnum {
-                    name: "UnusedEnum".to_string(),
-                    generics: vec![],
-                    variants: vec![],
-                    source_file: PathBuf::from("src/types.rs"),
-                    representation: EnumRepresentation::default(),
-                },
-            ],
-        };
-
-        let mut used_types = HashMap::new();
-        used_types.insert("Status".to_string(), PathBuf::from("src/types.rs"));
-
-        let (_, filtered_enums) = pipeline.filter_types(&parse_result, &make_type_collection(used_types));
-
-        assert_eq!(filtered_enums.len(), 1);
-        assert_eq!(filtered_enums[0].name, "Status");
-    }
-
-    #[test]
-    fn test_type_collection_detects_conflicts() {
-        let pipeline = Pipeline::new(false);
-        let mut resolver = ModuleResolver::new();
-
-        // Two files defining User
-        let code_a = r#"
-            pub struct User { pub id: i32 }
-        "#;
-        resolver
-            .parse_file(&PathBuf::from("src/a.rs"), code_a, &PathBuf::from("src"))
-            .unwrap();
-
-        let code_b = r#"
-            pub struct User { pub name: String }
-        "#;
-        resolver
-            .parse_file(&PathBuf::from("src/b.rs"), code_b, &PathBuf::from("src"))
-            .unwrap();
-
-        // Commands file that uses User but doesn't import explicitly
-        let code_cmd = r#"
-            fn some_fn() {}
-        "#;
-        resolver
-            .parse_file(
-                &PathBuf::from("src/commands.rs"),
-                code_cmd,
-                &PathBuf::from("src"),
-            )
-            .unwrap();
-
-        let parse_result = ParseResult {
-            commands: vec![
-                TauriCommand {
-                    name: "get_user_a".to_string(),
-                    args: vec![],
-                    return_type: Some(RustType::Custom("User".to_string())),
-                    source_file: PathBuf::from("src/a.rs"),
-                    rename_all: None,
-                },
-                TauriCommand {
-                    name: "get_user_b".to_string(),
-                    args: vec![],
-                    return_type: Some(RustType::Custom("User".to_string())),
-                    source_file: PathBuf::from("src/b.rs"),
-                    rename_all: None,
-                },
-            ],
-            structs: vec![
-                RustStruct {
-                    name: "User".to_string(),
-                    generics: vec![],
-                    fields: vec![StructField { has_explicit_rename: false, use_optional: false, is_flatten: false,
-                        name: "id".to_string(),
-                        ty: RustType::Primitive("i32".to_string()),
-                    }],
-                    source_file: PathBuf::from("src/a.rs"),
-                },
-                RustStruct {
-                    name: "User".to_string(),
-                    generics: vec![],
-                    fields: vec![StructField { has_explicit_rename: false, use_optional: false, is_flatten: false,
-                        name: "name".to_string(),
-                        ty: RustType::Primitive("String".to_string()),
-                    }],
-                    source_file: PathBuf::from("src/b.rs"),
-                },
-            ],
-            enums: vec![],
-        };
-
-        let result = pipeline.collect_used_types(&parse_result, &resolver);
-
-        // Should detect a conflict since User comes from two different files
-        assert!(result.conflicts.contains_key("User"));
-    }
-
-    #[test]
-    fn test_type_collection_no_conflicts_single_source() {
-        let pipeline = Pipeline::new(false);
-        let mut resolver = ModuleResolver::new();
-
+        let types_path = src_dir.join("types.rs");
         let types_code = r#"
-            pub struct User { pub id: i32 }
+            pub struct Request { pub data: String }
+            pub struct Response { pub result: i32 }
         "#;
-        resolver
-            .parse_file(
-                &PathBuf::from("src/types.rs"),
-                types_code,
-                &PathBuf::from("src"),
-            )
-            .unwrap();
+        write_file(&types_path, types_code);
 
-        let parse_result = ParseResult {
-            commands: vec![TauriCommand {
-                name: "get_user".to_string(),
-                args: vec![],
-                return_type: Some(RustType::Custom("User".to_string())),
-                source_file: PathBuf::from("src/types.rs"),
-                rename_all: None,
-            }],
-            structs: vec![RustStruct {
-                name: "User".to_string(),
-                generics: vec![],
-                fields: vec![],
-                source_file: PathBuf::from("src/types.rs"),
-            }],
-            enums: vec![],
-        };
+        let mut resolver = ModuleResolver::new();
+        resolver.parse_file(&types_path, types_code, &src_dir).unwrap();
 
-        let result = pipeline.collect_used_types(&parse_result, &resolver);
+        let commands = vec![TauriCommand {
+            name: "process".to_string(),
+            args: vec![CommandArg {
+                name: "req".to_string(),
+                ty: RustType::Custom("Request".to_string()),
+            }],
+            return_type: Some(RustType::Custom("Response".to_string())),
+            source_file: types_path.clone(),
+            rename_all: None,
+        }];
+
+        let result = pipeline.collect_reachable_types(&commands, &resolver, None);
 
         assert!(result.conflicts.is_empty());
-        assert!(result.resolved.contains_key("User"));
+        assert!(result.structs.iter().any(|s| s.name == "Request"));
+        assert!(result.structs.iter().any(|s| s.name == "Response"));
+    }
+
+    #[test]
+    fn test_collect_reachable_types_includes_aliases() {
+        let pipeline = Pipeline::new(false);
+        let temp_dir = tempfile::tempdir().unwrap();
+        let src_dir = temp_dir.path().join("src");
+
+        let types_path = src_dir.join("types.rs");
+        let types_code = r#"
+            pub struct User { pub id: i32 }
+            pub type UserAlias = User;
+        "#;
+        write_file(&types_path, types_code);
+
+        let mut resolver = ModuleResolver::new();
+        resolver.parse_file(&types_path, types_code, &src_dir).unwrap();
+
+        let commands = vec![TauriCommand {
+            name: "get_user".to_string(),
+            args: vec![CommandArg {
+                name: "user".to_string(),
+                ty: RustType::Custom("UserAlias".to_string()),
+            }],
+            return_type: None,
+            source_file: types_path.clone(),
+            rename_all: None,
+        }];
+
+        let result = pipeline.collect_reachable_types(&commands, &resolver, None);
+
+        assert!(result.aliases.iter().any(|a| a.name == "UserAlias"));
+        assert!(result.structs.iter().any(|s| s.name == "User"));
+    }
+
+    #[test]
+    fn test_collect_reachable_types_detects_conflicts() {
+        let pipeline = Pipeline::new(false);
+        let temp_dir = tempfile::tempdir().unwrap();
+        let src_dir = temp_dir.path().join("src");
+
+        let a_path = src_dir.join("a.rs");
+        let b_path = src_dir.join("b.rs");
+        let cmd_path = src_dir.join("commands.rs");
+        let code_a = "pub struct User { pub id: i32 }";
+        let code_b = "pub struct User { pub name: String }";
+        let cmd_code = "fn some_fn() {}";
+
+        write_file(&a_path, code_a);
+        write_file(&b_path, code_b);
+        write_file(&cmd_path, cmd_code);
+
+        let mut resolver = ModuleResolver::new();
+        resolver.parse_file(&a_path, code_a, &src_dir).unwrap();
+        resolver.parse_file(&b_path, code_b, &src_dir).unwrap();
+        resolver.parse_file(&cmd_path, cmd_code, &src_dir).unwrap();
+
+        let commands = vec![TauriCommand {
+            name: "get_user".to_string(),
+            args: vec![],
+            return_type: Some(RustType::Custom("User".to_string())),
+            source_file: cmd_path,
+            rename_all: None,
+        }];
+
+        let result = pipeline.collect_reachable_types(&commands, &resolver, None);
+
+        assert!(result.conflicts.contains_key("User"));
     }
 
     #[test]
@@ -1060,56 +885,6 @@ mod tests {
         assert!(!pipeline.verbose);
     }
 
-    #[test]
-    fn test_collect_types_from_args_and_return() {
-        let pipeline = Pipeline::new(false);
-        let mut resolver = ModuleResolver::new();
-
-        let code = r#"
-            pub struct Request { pub data: String }
-            pub struct Response { pub result: i32 }
-        "#;
-        resolver
-            .parse_file(
-                &PathBuf::from("src/types.rs"),
-                code,
-                &PathBuf::from("src"),
-            )
-            .unwrap();
-
-        let parse_result = ParseResult {
-            commands: vec![TauriCommand {
-                name: "process".to_string(),
-                args: vec![CommandArg {
-                    name: "req".to_string(),
-                    ty: RustType::Custom("Request".to_string()),
-                }],
-                return_type: Some(RustType::Custom("Response".to_string())),
-                source_file: PathBuf::from("src/types.rs"),
-                rename_all: None,
-            }],
-            structs: vec![
-                RustStruct {
-                    name: "Request".to_string(),
-                    generics: vec![],
-                    fields: vec![],
-                    source_file: PathBuf::from("src/types.rs"),
-                },
-                RustStruct {
-                    name: "Response".to_string(),
-                    generics: vec![],
-                    fields: vec![],
-                    source_file: PathBuf::from("src/types.rs"),
-                },
-            ],
-            enums: vec![],
-        };
-
-        let result = pipeline.collect_used_types(&parse_result, &resolver);
-
-        assert!(result.resolved.contains_key("Request"));
-        assert!(result.resolved.contains_key("Response"));
-    }
 
     #[test]
     fn test_filter_tauri_special_types() {
@@ -1208,4 +983,3 @@ mod tests {
         assert_eq!(commands[0].args[0].name, "id");
     }
 }
-
