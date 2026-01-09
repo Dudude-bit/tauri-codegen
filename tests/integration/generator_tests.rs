@@ -165,8 +165,7 @@ fn test_generate_with_naming_prefix() {
         type_suffix: "".to_string(),
         function_prefix: "".to_string(),
         function_suffix: "".to_string(),
-        preserve_field_names: false,
-    });
+            });
     ctx.register_type("User");
 
     let output = generate_types_file(&structs, &[], &[], &ctx);
@@ -188,8 +187,7 @@ fn test_generate_with_naming_suffix() {
         type_suffix: "DTO".to_string(),
         function_prefix: "".to_string(),
         function_suffix: "".to_string(),
-        preserve_field_names: false,
-    });
+            });
     ctx.register_type("User");
 
     let output = generate_types_file(&structs, &[], &[], &ctx);
@@ -212,8 +210,7 @@ fn test_generate_command_with_function_prefix_suffix() {
         type_suffix: "".to_string(),
         function_prefix: "api".to_string(),
         function_suffix: "Cmd".to_string(),
-        preserve_field_names: false,
-    });
+            });
     ctx.register_type("User");
 
     let types_path = PathBuf::from("./types.ts");
@@ -289,27 +286,30 @@ fn test_empty_commands_generates_valid_file() {
 }
 
 #[test]
-fn test_snake_case_fields_converted_to_camel_case() {
+fn test_field_names_match_serde_behavior() {
+    // Field names should match serde serialization:
+    // - Without serde attrs: original name preserved (snake_case)
+    // - With serde rename_all="camelCase": camelCase names (has_explicit_rename=true)
     let structs = vec![RustStruct {
         name: "User".to_string(),
         generics: vec![],
         fields: vec![
             StructField {
-                name: "user_id".to_string(),
+                name: "user_id".to_string(), // No serde rename -> stays user_id
                 ty: RustType::Primitive("i32".to_string()),
                 has_explicit_rename: false,
                 use_optional: false, is_flatten: false,
             },
             StructField {
-                name: "first_name".to_string(),
+                name: "firstName".to_string(), // serde(rename_all="camelCase") applied
                 ty: RustType::Primitive("String".to_string()),
-                has_explicit_rename: false,
+                has_explicit_rename: true,
                 use_optional: false, is_flatten: false,
             },
             StructField {
-                name: "last_login_at".to_string(),
+                name: "CUSTOM_NAME".to_string(), // serde(rename="CUSTOM_NAME") applied
                 ty: RustType::Primitive("DateTime".to_string()),
-                has_explicit_rename: false,
+                has_explicit_rename: true,
                 use_optional: false, is_flatten: false,
             },
         ],
@@ -320,14 +320,12 @@ fn test_snake_case_fields_converted_to_camel_case() {
 
     let output = generate_types_file(&structs, &[], &[], &ctx);
 
-    assert!(output.contains("userId: number"));
+    // Without serde rename, original snake_case is preserved
+    assert!(output.contains("user_id: number"));
+    // With serde rename_all="camelCase", uses camelCase
     assert!(output.contains("firstName: string"));
-    assert!(output.contains("lastLoginAt: string"));
-
-    // Should NOT contain snake_case
-    assert!(!output.contains("user_id:"));
-    assert!(!output.contains("first_name:"));
-    assert!(!output.contains("last_login_at:"));
+    // With explicit serde rename, uses that name
+    assert!(output.contains("CUSTOM_NAME: string"));
 }
 
 #[test]

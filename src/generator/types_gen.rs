@@ -1,5 +1,4 @@
 use crate::models::{EnumRepresentation, RustEnum, RustStruct, RustTypeAlias, VariantData};
-use crate::utils::to_camel_case;
 
 use super::{type_mapper::rust_to_typescript, GeneratorContext};
 
@@ -50,15 +49,9 @@ fn render_field(field: &crate::models::StructField, ctx: &GeneratorContext) -> (
         ("", rust_to_typescript(&field.ty, ctx))
     };
 
-    // If serde rename was explicitly set, use the name as-is.
-    // Otherwise, preserve Rust field names when configured, or fall back to camelCase.
-    let field_name = if field.has_explicit_rename {
-        field.name.clone()
-    } else if ctx.naming.preserve_field_names {
-        field.name.clone()
-    } else {
-        to_camel_case(&field.name)
-    };
+    // Field name already reflects serde configuration from parser
+    // (rename, rename_all, or original name if no serde attrs)
+    let field_name = field.name.clone();
 
     (field_name, optional_marker, ts_type)
 }
@@ -505,7 +498,8 @@ mod tests {
     }
 
     #[test]
-    fn test_camel_case_field_names() {
+    fn test_field_names_preserved_without_serde_attrs() {
+        // Without serde attrs, field names should be preserved as-is (snake_case)
         let s = RustStruct {
             name: "User".to_string(),
             generics: vec![],
@@ -529,8 +523,9 @@ mod tests {
         let ctx = default_ctx();
         let output = generate_interface(&s, &ctx);
 
-        assert!(output.contains("userId: number"));
-        assert!(output.contains("firstName: string"));
+        // Without serde rename_all, fields keep their original snake_case names
+        assert!(output.contains("user_id: number"));
+        assert!(output.contains("first_name: string"));
     }
 
     #[test]
@@ -676,7 +671,6 @@ mod tests {
             type_suffix: "".to_string(),
             function_prefix: "".to_string(),
             function_suffix: "".to_string(),
-            preserve_field_names: false,
         });
         let output = generate_interface(&s, &ctx);
 
@@ -684,28 +678,30 @@ mod tests {
     }
 
     #[test]
-    fn test_field_explicit_rename_skips_camel_case() {
-        // Struct with one normal field and one explicitly renamed field
+    fn test_field_names_match_serde_serialization() {
+        // Field names should match what serde will serialize:
+        // - Without serde attrs: original name (snake_case)
+        // - With explicit rename: the renamed value
         let s = RustStruct {
             name: "Config".to_string(),
             generics: vec![],
             fields: vec![
                 StructField {
-                    name: "user_name".to_string(), // Should become userName
+                    name: "user_name".to_string(), // No serde attrs -> stays user_name
                     ty: RustType::Primitive("String".to_string()),
                     has_explicit_rename: false,
                     use_optional: false, is_flatten: false,
                 },
                 StructField {
-                    name: "API_KEY".to_string(), // Should succeed as API_KEY
+                    name: "API_KEY".to_string(), // serde(rename = "API_KEY") -> API_KEY
                     ty: RustType::Primitive("String".to_string()),
-                    has_explicit_rename: true, // Simulate #[serde(rename = "API_KEY")]
+                    has_explicit_rename: true,
                     use_optional: false, is_flatten: false,
                 },
                 StructField {
-                    name: "snake_case_kept".to_string(), // Should fail check if it was converted
+                    name: "camelCaseField".to_string(), // serde(rename_all = "camelCase") -> camelCaseField
                     ty: RustType::Primitive("bool".to_string()),
-                    has_explicit_rename: true, // Simulate #[serde(rename = "snake_case_kept")]
+                    has_explicit_rename: true,
                     use_optional: false, is_flatten: false,
                 },
             ],
@@ -715,46 +711,12 @@ mod tests {
         let ctx = default_ctx();
         let output = generate_interface(&s, &ctx);
 
-        assert!(output.contains("userName: string"));
+        // Without serde attrs, field keeps original name
+        assert!(output.contains("user_name: string"));
+        assert!(!output.contains("userName: string"));
+        // With explicit rename, uses the renamed value
         assert!(output.contains("API_KEY: string"));
-        assert!(!output.contains("apiKey: string"));
-        assert!(output.contains("snake_case_kept: boolean"));
-        assert!(!output.contains("snakeCaseKept: boolean"));
-    }
-
-    #[test]
-    fn test_preserve_field_names_keeps_snake_case() {
-        let s = RustStruct {
-            name: "PortForwardRequest".to_string(),
-            generics: vec![],
-            fields: vec![
-                StructField {
-                    name: "local_port".to_string(),
-                    ty: RustType::Primitive("u16".to_string()),
-                    has_explicit_rename: false,
-                    use_optional: false,
-                    is_flatten: false,
-                },
-                StructField {
-                    name: "auto_reconnect".to_string(),
-                    ty: RustType::Primitive("bool".to_string()),
-                    has_explicit_rename: false,
-                    use_optional: false,
-                    is_flatten: false,
-                },
-            ],
-            source_file: test_path(),
-        };
-
-        let ctx = GeneratorContext::new(NamingConfig {
-            preserve_field_names: true,
-            ..NamingConfig::default()
-        });
-        let output = generate_interface(&s, &ctx);
-
-        assert!(output.contains("local_port: number"));
-        assert!(output.contains("auto_reconnect: boolean"));
-        assert!(!output.contains("localPort: number"));
+        assert!(output.contains("camelCaseField: boolean"));
     }
 
     #[test]
@@ -787,7 +749,10 @@ mod tests {
     }
 
     #[test]
-    fn test_enum_struct_variant_field_rename() {
+    fn test_enum_struct_variant_field_names() {
+        // Field names match serde behavior:
+        // - Without explicit rename: original name preserved
+        // - With explicit rename: uses the renamed value
         let e = RustEnum {
             name: "Event".to_string(),
             generics: vec![],
@@ -797,13 +762,13 @@ mod tests {
                     StructField {
                         name: "user_id".to_string(),
                         ty: RustType::Primitive("i32".to_string()),
-                        has_explicit_rename: false, // Normal conversion -> userId
+                        has_explicit_rename: false, // No serde rename -> keeps user_id
                         use_optional: false, is_flatten: false,
                     },
                     StructField {
                         name: "TIMESTAMP".to_string(),
                         ty: RustType::Primitive("i64".to_string()),
-                        has_explicit_rename: true, // Kept as TIMESTAMP
+                        has_explicit_rename: true, // serde(rename = "TIMESTAMP") -> TIMESTAMP
                         use_optional: false, is_flatten: false,
                     },
                 ]),
@@ -816,9 +781,8 @@ mod tests {
         let ctx = default_ctx();
         let output = generate_enum_type(&e, &ctx);
 
-        assert!(output.contains("userId: number"));
-        assert!(output.contains("TIMESTAMP: number"));
-        assert!(!output.contains("timestamp: number"));
+        assert!(output.contains("user_id: number")); // Preserved as-is
+        assert!(output.contains("TIMESTAMP: number")); // Explicit rename preserved
     }
 
     #[test]

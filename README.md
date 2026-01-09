@@ -82,7 +82,6 @@ Customize naming conventions for generated types and functions.
 | `type_suffix` | Suffix added to all generated interface names (e.g., "DTO"). | `""` |
 | `function_prefix` | Prefix for generated command functions. | `""` |
 | `function_suffix` | Suffix for generated command functions. | `""` |
-| `preserve_field_names` | Keep Rust field names for struct fields unless serde rename/rename_all is present. | `false` |
 
 ## Type Mappings
 
