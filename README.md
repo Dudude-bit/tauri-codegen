@@ -9,8 +9,9 @@ A powerful CLI tool to automatically generate TypeScript bindings from your Rust
 - **Automated Scanning**: Recursively scans your `src-tauri` directory for commands and types.
 - **Type Safety**: Generates exact TypeScript definitions for Rust structs, enums, and type aliases.
 - **Serde Support**:
-    - Respects `#[serde(rename = "...")]` attributes, preserving the exact name and overriding camelCase conversion.
-    - Handles `#[serde(rename_all = "...")]` for enums and structs.
+    - Field and variant names in generated TypeScript **match exactly** what serde emits in JSON at runtime.
+    - Respects `#[serde(rename = "...")]` on fields and variants.
+    - Handles `#[serde(rename_all = "...")]` for enums and structs (`lowercase`, `UPPERCASE`, `camelCase`, `PascalCase`, `snake_case`, `SCREAMING_SNAKE_CASE`, `kebab-case`, `SCREAMING-KEBAB-CASE`).
     - Supports `#[serde(tag = "...")]`, `#[serde(content = "...")]`, and `#[serde(untagged)]` enum representations.
     - Supports `#[serde(flatten)]` to generate TypeScript intersection types.
     - Fields with `#[serde(skip)]` are excluded from TypeScript output.
@@ -137,8 +138,8 @@ export async function getUser(id: number): Promise<User> {
 }
 ```
 
-### 2. Serde Rename (Exact Casing)
-When `#[serde(rename = "...")]` is used, the generator preserves the exact casing, skipping the default camelCase conversion.
+### 2. Field Naming (Matches Serde JSON)
+Field names in the generated TypeScript match exactly what serde will produce in JSON. Without any serde attributes, the Rust field name is preserved as-is (so a `snake_case` field stays `snake_case` in TypeScript). Use `#[serde(rename = "...")]` or `#[serde(rename_all = "...")]` to control the output.
 
 **Rust:**
 ```rust
@@ -148,13 +149,25 @@ pub struct Config {
     pub api_key: String,
     pub retries: i32,
 }
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct User {
+    pub user_id: i32,
+    pub first_name: String,
+}
 ```
 
 **TypeScript Output:**
 ```typescript
 export interface Config {
-  API_KEY: string;  // Exactly as renamed in Rust
-  retries: number;  // Default camelCase
+  API_KEY: string;  // Exact rename
+  retries: number;  // No serde attrs → name preserved as-is
+}
+
+export interface User {
+  userId: number;    // rename_all = "camelCase"
+  firstName: string;
 }
 ```
 

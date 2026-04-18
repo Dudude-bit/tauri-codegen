@@ -1,7 +1,7 @@
 use crate::models::{
     EnumRepresentation, EnumVariant, RustEnum, RustStruct, RustTypeAlias, StructField, VariantData,
 };
-use crate::utils::{to_camel_case, to_kebab_case, to_screaming_kebab_case, to_screaming_snake_case, to_snake_case};
+use crate::utils::{to_camel_case, to_kebab_case, to_pascal_case, to_screaming_kebab_case, to_screaming_snake_case, to_snake_case};
 use anyhow::Result;
 use std::collections::HashSet;
 use std::path::Path;
@@ -675,7 +675,7 @@ fn apply_rename_all(name: &str, rename_all: &Option<String>) -> Option<String> {
         "SCREAMING_SNAKE_CASE" => to_screaming_snake_case(name),
         "kebab-case" => to_kebab_case(name),
         "SCREAMING-KEBAB-CASE" => to_screaming_kebab_case(name),
-        "PascalCase" => name.to_string(), // Usually already PascalCase in Rust
+        "PascalCase" => to_pascal_case(name),
         unknown => {
             eprintln!(
                 "Warning: Unknown rename_all convention '{}', using original name. \
@@ -984,6 +984,82 @@ mod tests {
         assert!(request.fields[0].has_explicit_rename);
         assert_eq!(request.fields[1].name, "remotePort");
         assert!(request.fields[1].has_explicit_rename);
+    }
+
+    #[test]
+    fn test_apply_rename_all_all_conventions_for_fields() {
+        let field = "user_id";
+        assert_eq!(apply_rename_all(field, &Some("lowercase".into())).unwrap(), "user_id");
+        assert_eq!(apply_rename_all(field, &Some("UPPERCASE".into())).unwrap(), "USER_ID");
+        assert_eq!(apply_rename_all(field, &Some("camelCase".into())).unwrap(), "userId");
+        assert_eq!(apply_rename_all(field, &Some("PascalCase".into())).unwrap(), "UserId");
+        assert_eq!(apply_rename_all(field, &Some("snake_case".into())).unwrap(), "user_id");
+        assert_eq!(apply_rename_all(field, &Some("SCREAMING_SNAKE_CASE".into())).unwrap(), "USER_ID");
+        assert_eq!(apply_rename_all(field, &Some("kebab-case".into())).unwrap(), "user-id");
+        assert_eq!(apply_rename_all(field, &Some("SCREAMING-KEBAB-CASE".into())).unwrap(), "USER-ID");
+    }
+
+    #[test]
+    fn test_apply_rename_all_all_conventions_for_variants() {
+        let variant = "GetUser";
+        assert_eq!(apply_rename_all(variant, &Some("lowercase".into())).unwrap(), "getuser");
+        assert_eq!(apply_rename_all(variant, &Some("UPPERCASE".into())).unwrap(), "GETUSER");
+        assert_eq!(apply_rename_all(variant, &Some("camelCase".into())).unwrap(), "getUser");
+        assert_eq!(apply_rename_all(variant, &Some("PascalCase".into())).unwrap(), "GetUser");
+        assert_eq!(apply_rename_all(variant, &Some("snake_case".into())).unwrap(), "get_user");
+        assert_eq!(apply_rename_all(variant, &Some("SCREAMING_SNAKE_CASE".into())).unwrap(), "GET_USER");
+        assert_eq!(apply_rename_all(variant, &Some("kebab-case".into())).unwrap(), "get-user");
+        assert_eq!(apply_rename_all(variant, &Some("SCREAMING-KEBAB-CASE".into())).unwrap(), "GET-USER");
+    }
+
+    #[test]
+    fn test_apply_rename_all_none_returns_none() {
+        assert_eq!(apply_rename_all("user_id", &None), None);
+    }
+
+    #[test]
+    fn test_apply_rename_all_unknown_convention_falls_back_to_original() {
+        assert_eq!(
+            apply_rename_all("user_id", &Some("bogus".into())).unwrap(),
+            "user_id"
+        );
+    }
+
+    #[test]
+    fn test_serde_rename_all_pascal_case_on_struct_fields() {
+        let code = r#"
+            #[derive(Serialize)]
+            #[serde(rename_all = "PascalCase")]
+            pub struct User {
+                pub user_id: i32,
+                pub first_name: String,
+            }
+        "#;
+
+        let (structs, _) = parse_types(code, &test_path()).unwrap();
+        assert_eq!(structs.len(), 1);
+
+        let user = &structs[0];
+        assert_eq!(user.fields[0].name, "UserId");
+        assert_eq!(user.fields[1].name, "FirstName");
+    }
+
+    #[test]
+    fn test_field_rename_overrides_container_rename_all() {
+        let code = r#"
+            #[derive(Serialize)]
+            #[serde(rename_all = "camelCase")]
+            pub struct Config {
+                #[serde(rename = "API_KEY")]
+                pub api_key: String,
+                pub other_field: String,
+            }
+        "#;
+
+        let (structs, _) = parse_types(code, &test_path()).unwrap();
+        let cfg = &structs[0];
+        assert_eq!(cfg.fields[0].name, "API_KEY");
+        assert_eq!(cfg.fields[1].name, "otherField");
     }
 
     #[test]

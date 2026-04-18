@@ -41,6 +41,25 @@ pub fn to_snake_case(s: &str) -> String {
     result
 }
 
+/// Convert snake_case (or PascalCase) to PascalCase.
+/// Safe to apply to already-PascalCase input: it round-trips via snake_case.
+pub fn to_pascal_case(s: &str) -> String {
+    let snake = to_snake_case(s);
+    let mut result = String::new();
+    let mut capitalize_next = true;
+    for c in snake.chars() {
+        if c == '_' {
+            capitalize_next = true;
+        } else if capitalize_next {
+            result.push(c.to_ascii_uppercase());
+            capitalize_next = false;
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
 /// Convert PascalCase to SCREAMING_SNAKE_CASE
 pub fn to_screaming_snake_case(s: &str) -> String {
     to_snake_case(s).to_uppercase()
@@ -88,6 +107,27 @@ mod tests {
     fn test_to_camel_case_already_camel() {
         assert_eq!(to_camel_case("getUser"), "getUser");
         assert_eq!(to_camel_case("getUserById"), "getUserById");
+    }
+
+    #[test]
+    fn test_to_pascal_case_from_snake() {
+        assert_eq!(to_pascal_case("user_id"), "UserId");
+        assert_eq!(to_pascal_case("get_user_by_id"), "GetUserById");
+        assert_eq!(to_pascal_case("hello"), "Hello");
+    }
+
+    #[test]
+    fn test_to_pascal_case_round_trip_from_pascal() {
+        assert_eq!(to_pascal_case("GetUser"), "GetUser");
+        // All-caps acronyms survive the snake_case round-trip unchanged.
+        assert_eq!(to_pascal_case("HTTP"), "HTTP");
+    }
+
+    #[test]
+    fn test_to_pascal_case_edge_cases() {
+        assert_eq!(to_pascal_case(""), "");
+        assert_eq!(to_pascal_case("a"), "A");
+        assert_eq!(to_pascal_case("get__user"), "GetUser");
     }
 }
 

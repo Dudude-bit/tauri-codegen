@@ -18,12 +18,13 @@ pub struct RustStruct {
 /// Represents a struct field
 #[derive(Debug, Clone, PartialEq)]
 pub struct StructField {
-    /// Field name (may be renamed via serde)
+    /// Field name as it appears in serialized output.
+    /// Already reflects serde `rename`/`rename_all` transformations applied by the parser.
     pub name: String,
     /// Field type
     pub ty: RustType,
-    /// Whether the name was set via serde rename or rename_all
-    /// If true, the name should be used as-is without camelCase conversion
+    /// Whether the name came from a serde `rename` or `rename_all` attribute.
+    /// Informational only — `name` is always authoritative for TypeScript output.
     pub has_explicit_rename: bool,
     /// Whether to use undefined instead of null for Option types
     /// Set via #[ts(optional)] attribute
@@ -78,12 +79,13 @@ pub enum EnumRepresentation {
 /// Represents an enum variant
 #[derive(Debug, Clone, PartialEq)]
 pub struct EnumVariant {
-    /// Variant name (may be renamed via serde)
+    /// Variant name as it appears in serialized output.
+    /// Already reflects serde `rename`/`rename_all` transformations applied by the parser.
     pub name: String,
     /// Variant data (for tuple/struct variants)
     pub data: VariantData,
-    /// Whether the name was set via serde rename or rename_all
-    /// If true, the name should be used as-is without transformation
+    /// Whether the name came from a serde `rename` or `rename_all` attribute.
+    /// Informational only — `name` is always authoritative for TypeScript output.
     pub has_explicit_rename: bool,
 }
 
