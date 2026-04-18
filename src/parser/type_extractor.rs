@@ -499,7 +499,10 @@ mod tests {
         let ty = parse_type_str("Arc<String>");
         match parse_type(&ty) {
             RustType::Primitive(name) => assert_eq!(name, "String"),
-            other => panic!("Expected Primitive(String) from Arc<String>, got {:?}", other),
+            other => panic!(
+                "Expected Primitive(String) from Arc<String>, got {:?}",
+                other
+            ),
         }
     }
 
