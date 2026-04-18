@@ -96,6 +96,7 @@ The generator maps Rust types to TypeScript as follows:
 | `Option<T>` | `T \| null` (default), or optional field `?: T` (with `#[ts(optional)]`) |
 | `Vec<T>` | `T[]` |
 | `HashMap<K, V>` | `Record<K, V>` (if K is string/number) |
+| `Box<T>`, `Arc<T>`, `Rc<T>`, `Cow<'_, T>` | `T` (transparent — matches serde's serialization) |
 | `Result<T, E>` | `Promise<T>` (in return types) |
 | `()` / `Unit` | `void` |
 | `bytes::Bytes` | `number[]` |

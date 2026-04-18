@@ -92,6 +92,18 @@ pub fn parse_type_with_context(ty: &Type, generic_params: &HashSet<String>) -> R
                         }
                     }
 
+                    // Transparent smart-pointer / wrapper containers: serde (and Tauri's JSON
+                    // bridge) serialize the inner type unchanged, so the TypeScript output
+                    // should reflect the inner type too. Cow<'a, T> is handled by skipping
+                    // the leading lifetime argument when extracting the type parameter.
+                    "Box" | "Rc" | "Arc" | "Cow" => {
+                        if let Some(inner) = extract_first_type_arg(&segment.arguments) {
+                            parse_type_with_context(&inner, generic_params)
+                        } else {
+                            RustType::Unknown(format!("{}<?>", name))
+                        }
+                    }
+
                     // Custom types (not a known generic param)
                     _ => {
                         // Reconstruct full path for custom types
@@ -145,6 +157,19 @@ fn extract_single_generic(args: &PathArguments) -> Option<Type> {
     if let PathArguments::AngleBracketed(angle) = args {
         if let Some(GenericArgument::Type(ty)) = angle.args.first() {
             return Some(ty.clone());
+        }
+    }
+    None
+}
+
+/// Extract the first type argument, skipping lifetimes and const generics.
+/// Needed for wrappers like Cow<'a, T> where the first arg is a lifetime.
+fn extract_first_type_arg(args: &PathArguments) -> Option<Type> {
+    if let PathArguments::AngleBracketed(angle) = args {
+        for arg in &angle.args {
+            if let GenericArgument::Type(ty) = arg {
+                return Some(ty.clone());
+            }
         }
     }
     None
@@ -457,6 +482,70 @@ mod tests {
         match parse_type(&ty) {
             RustType::Primitive(name) => assert_eq!(name, "String"),
             other => panic!("Expected Primitive(String) from &String, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_box_unwraps_to_inner() {
+        let ty = parse_type_str("Box<User>");
+        match parse_type(&ty) {
+            RustType::Custom(name) => assert_eq!(name, "User"),
+            other => panic!("Expected Custom(User) from Box<User>, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_arc_unwraps_to_inner() {
+        let ty = parse_type_str("Arc<String>");
+        match parse_type(&ty) {
+            RustType::Primitive(name) => assert_eq!(name, "String"),
+            other => panic!("Expected Primitive(String) from Arc<String>, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_rc_unwraps_to_inner() {
+        let ty = parse_type_str("Rc<i32>");
+        match parse_type(&ty) {
+            RustType::Primitive(name) => assert_eq!(name, "i32"),
+            other => panic!("Expected Primitive(i32) from Rc<i32>, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_cow_with_lifetime_unwraps_to_inner() {
+        let ty = parse_type_str("Cow<'a, str>");
+        match parse_type(&ty) {
+            RustType::Primitive(name) => assert_eq!(name, "String"),
+            other => panic!(
+                "Expected Primitive(String) from Cow<'a, str>, got {:?}",
+                other
+            ),
+        }
+    }
+
+    #[test]
+    fn test_parse_nested_smart_pointers() {
+        let ty = parse_type_str("Vec<Box<User>>");
+        match parse_type(&ty) {
+            RustType::Vec(inner) => match *inner {
+                RustType::Custom(name) => assert_eq!(name, "User"),
+                other => panic!("Expected Custom(User) inside Vec, got {:?}", other),
+            },
+            other => panic!("Expected Vec, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_parse_option_box_self_ref() {
+        // `Option<Box<Node>>` — the pattern used in recursive data structures.
+        let ty = parse_type_str("Option<Box<Node>>");
+        match parse_type(&ty) {
+            RustType::Option(inner) => match *inner {
+                RustType::Custom(name) => assert_eq!(name, "Node"),
+                other => panic!("Expected Custom(Node) inside Option, got {:?}", other),
+            },
+            other => panic!("Expected Option, got {:?}", other),
         }
     }
 }

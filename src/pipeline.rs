@@ -1010,4 +1010,76 @@ mod tests {
         assert_eq!(commands[0].args.len(), 1);
         assert_eq!(commands[0].args[0].name, "id");
     }
+
+    #[test]
+    fn test_collect_reachable_types_handles_self_referential_struct() {
+        // A self-referential tree node is the canonical stress test for the
+        // reachable-type fixpoint loop: without dedup, this would recurse forever.
+        let pipeline = Pipeline::new(false);
+        let temp_dir = tempfile::tempdir().unwrap();
+        let src_dir = temp_dir.path().join("src");
+
+        let types_path = src_dir.join("types.rs");
+        let types_code = r#"
+            pub struct Node {
+                pub value: i32,
+                pub next: Option<Box<Node>>,
+            }
+        "#;
+        write_file(&types_path, types_code);
+
+        let mut resolver = ModuleResolver::new();
+        resolver
+            .parse_file(&types_path, types_code, &src_dir)
+            .unwrap();
+
+        let commands = vec![TauriCommand {
+            name: "get_head".to_string(),
+            args: vec![],
+            return_type: Some(RustType::Custom("Node".to_string())),
+            source_file: types_path.clone(),
+            rename_all: None,
+        }];
+
+        let result = pipeline.collect_reachable_types(&commands, &resolver, None);
+
+        assert!(result.conflicts.is_empty());
+        // Node must appear exactly once despite the self-reference.
+        let node_count = result.structs.iter().filter(|s| s.name == "Node").count();
+        assert_eq!(node_count, 1, "Self-referential struct must be deduped");
+    }
+
+    #[test]
+    fn test_collect_reachable_types_handles_mutually_recursive_structs() {
+        // A -> B -> A cycle. Without cycle protection the fixpoint loop
+        // would oscillate between the two types forever.
+        let pipeline = Pipeline::new(false);
+        let temp_dir = tempfile::tempdir().unwrap();
+        let src_dir = temp_dir.path().join("src");
+
+        let types_path = src_dir.join("types.rs");
+        let types_code = r#"
+            pub struct A { pub b: Option<Box<B>> }
+            pub struct B { pub a: Option<Box<A>> }
+        "#;
+        write_file(&types_path, types_code);
+
+        let mut resolver = ModuleResolver::new();
+        resolver
+            .parse_file(&types_path, types_code, &src_dir)
+            .unwrap();
+
+        let commands = vec![TauriCommand {
+            name: "get_a".to_string(),
+            args: vec![],
+            return_type: Some(RustType::Custom("A".to_string())),
+            source_file: types_path.clone(),
+            rename_all: None,
+        }];
+
+        let result = pipeline.collect_reachable_types(&commands, &resolver, None);
+
+        assert_eq!(result.structs.iter().filter(|s| s.name == "A").count(), 1);
+        assert_eq!(result.structs.iter().filter(|s| s.name == "B").count(), 1);
+    }
 }
