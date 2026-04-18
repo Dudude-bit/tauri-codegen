@@ -2,10 +2,11 @@
 //!
 //! Flow: Scan -> Parse -> Resolve -> Collect -> Generate
 
+pub mod collect;
+
 use anyhow::{Context, Result};
-use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use crate::cargo_expand::{find_cargo_manifest, run_cargo_expand};
 use crate::config::Config;
@@ -15,25 +16,11 @@ use crate::generator::{
 };
 use crate::known_types;
 use crate::models::{ParseResult, RustEnum, RustStruct, RustType, RustTypeAlias};
-use crate::parser::{
-    parse_commands, parse_types_expanded_with_aliases, parse_types_with_aliases, ParsedTypes,
-};
-use crate::resolver::{ModuleResolver, ResolutionResult};
+use crate::parser::{parse_commands, parse_types_expanded_with_aliases, ParsedTypes};
+use crate::resolver::ModuleResolver;
 use crate::scanner::Scanner;
 
-/// Result of type collection with potential conflicts
-pub struct TypeCollectionResult {
-    /// Collected structs reachable from command signatures
-    pub structs: Vec<RustStruct>,
-    /// Collected enums reachable from command signatures
-    pub enums: Vec<RustEnum>,
-    /// Collected type aliases reachable from command signatures
-    pub aliases: Vec<RustTypeAlias>,
-    /// Conflicts: type name -> list of conflicting source files
-    pub conflicts: HashMap<String, Vec<PathBuf>>,
-    /// Unresolved types: type name -> file where it was used
-    pub unresolved: HashMap<String, PathBuf>,
-}
+pub use collect::TypeCollectionResult;
 
 /// Main pipeline for code generation
 pub struct Pipeline {
@@ -295,298 +282,17 @@ impl Pipeline {
         Ok((parse_result, resolver, expanded_types))
     }
 
-    /// Step 3: Collect types reachable from command signatures
-    fn collect_reachable_types(
+    /// Step 3: Collect types reachable from command signatures.
+    /// Thin wrapper over `pipeline::collect::collect_reachable_types` kept so
+    /// the existing `Pipeline::collect_reachable_types(...)` test call sites
+    /// continue to work unchanged.
+    pub(crate) fn collect_reachable_types(
         &self,
         commands: &[crate::models::TauriCommand],
         resolver: &ModuleResolver,
         expanded_types: Option<&ParsedTypes>,
     ) -> TypeCollectionResult {
-        let mut resolved_types: HashMap<String, PathBuf> = HashMap::new();
-        let mut conflicts: HashMap<String, Vec<PathBuf>> = HashMap::new();
-        let mut unresolved: HashMap<String, PathBuf> = HashMap::new();
-        let mut parsed_files: HashMap<PathBuf, ParsedTypes> = HashMap::new();
-        let mut structs: Vec<RustStruct> = Vec::new();
-        let mut enums: Vec<RustEnum> = Vec::new();
-        let mut aliases: Vec<RustTypeAlias> = Vec::new();
-        let mut seen_structs: HashSet<(String, PathBuf)> = HashSet::new();
-        let mut seen_enums: HashSet<(String, PathBuf)> = HashSet::new();
-        let mut seen_aliases: HashSet<String> = HashSet::new();
-        let mut reexport_aliases: HashMap<String, (String, PathBuf)> = HashMap::new();
-        let mut to_process: Vec<(String, PathBuf)> = Vec::new();
-        let mut processed: HashSet<(String, PathBuf)> = HashSet::new();
-        let expanded_path = PathBuf::from("<cargo-expand>");
-
-        if let Some(parsed) = expanded_types {
-            parsed_files.insert(expanded_path.clone(), parsed.clone());
-        }
-
-        fn add_conflict_path(
-            name: &str,
-            path: &PathBuf,
-            conflicts: &mut HashMap<String, Vec<PathBuf>>,
-        ) {
-            let entry = conflicts.entry(name.to_string()).or_default();
-            if !entry.contains(path) {
-                entry.push(path.clone());
-            }
-        }
-
-        // Helper threads six mutable collections through a single recursive step.
-        // Refactoring into a struct is tracked for Track 4 (architecture cleanup).
-        #[allow(clippy::too_many_arguments)]
-        fn resolve_and_enqueue(
-            type_name: &str,
-            from_file: &Path,
-            resolver: &ModuleResolver,
-            resolved_types: &mut HashMap<String, PathBuf>,
-            conflicts: &mut HashMap<String, Vec<PathBuf>>,
-            unresolved: &mut HashMap<String, PathBuf>,
-            to_process: &mut Vec<(String, PathBuf)>,
-            reexport_aliases: &mut HashMap<String, (String, PathBuf)>,
-        ) {
-            match resolver.resolve_type(type_name, from_file) {
-                ResolutionResult::Found(source) => {
-                    let simple_name = type_name
-                        .split("::")
-                        .last()
-                        .unwrap_or(type_name)
-                        .to_string();
-                    if let Some(existing) = resolved_types.get(&simple_name) {
-                        if existing != &source {
-                            add_conflict_path(&simple_name, existing, conflicts);
-                            add_conflict_path(&simple_name, &source, conflicts);
-                        }
-                    } else {
-                        resolved_types.insert(simple_name.clone(), source.clone());
-                        to_process.push((simple_name, source));
-                    }
-                }
-                ResolutionResult::FoundWithAlias(source, original_name) => {
-                    let alias_name = type_name
-                        .split("::")
-                        .last()
-                        .unwrap_or(type_name)
-                        .to_string();
-                    if let Some(existing) = resolved_types.get(&alias_name) {
-                        if existing != &source {
-                            add_conflict_path(&alias_name, existing, conflicts);
-                            add_conflict_path(&alias_name, &source, conflicts);
-                        }
-                    } else {
-                        resolved_types.insert(alias_name.clone(), source.clone());
-                    }
-                    reexport_aliases
-                        .entry(alias_name)
-                        .or_insert_with(|| (original_name.clone(), source.clone()));
-                    to_process.push((original_name, source));
-                }
-                ResolutionResult::Ambiguous(paths) => {
-                    let simple_name = type_name
-                        .split("::")
-                        .last()
-                        .unwrap_or(type_name)
-                        .to_string();
-                    for path in paths {
-                        add_conflict_path(&simple_name, &path, conflicts);
-                    }
-                }
-                ResolutionResult::NotFound => {
-                    let simple_name = type_name
-                        .split("::")
-                        .last()
-                        .unwrap_or(type_name)
-                        .to_string();
-                    unresolved
-                        .entry(simple_name)
-                        .or_insert_with(|| from_file.to_path_buf());
-                }
-            }
-        }
-
-        for cmd in commands {
-            let cmd_file = &cmd.source_file;
-            for arg in &cmd.args {
-                for t in collect_custom_types_from_rust_type(&arg.ty) {
-                    resolve_and_enqueue(
-                        &t,
-                        cmd_file,
-                        resolver,
-                        &mut resolved_types,
-                        &mut conflicts,
-                        &mut unresolved,
-                        &mut to_process,
-                        &mut reexport_aliases,
-                    );
-                }
-            }
-            if let Some(ref ret_type) = cmd.return_type {
-                for t in collect_custom_types_from_rust_type(ret_type) {
-                    resolve_and_enqueue(
-                        &t,
-                        cmd_file,
-                        resolver,
-                        &mut resolved_types,
-                        &mut conflicts,
-                        &mut unresolved,
-                        &mut to_process,
-                        &mut reexport_aliases,
-                    );
-                }
-            }
-        }
-
-        while let Some((type_name, type_file)) = to_process.pop() {
-            let key = (type_name.clone(), type_file.clone());
-            if processed.contains(&key) {
-                continue;
-            }
-            processed.insert(key);
-
-            if type_file != expanded_path && !parsed_files.contains_key(&type_file) {
-                match fs::read_to_string(&type_file) {
-                    Ok(content) => match parse_types_with_aliases(&content, &type_file) {
-                        Ok(parsed) => {
-                            parsed_files.insert(type_file.clone(), parsed);
-                        }
-                        Err(e) => {
-                            self.diag.warn(format!(
-                                "Failed to parse types in {}: {}",
-                                type_file.display(),
-                                e
-                            ));
-                            continue;
-                        }
-                    },
-                    Err(e) => {
-                        self.diag.warn(format!(
-                            "Failed to read file for types {}: {}",
-                            type_file.display(),
-                            e
-                        ));
-                        continue;
-                    }
-                }
-            }
-
-            let parsed = match parsed_files.get(&type_file) {
-                Some(parsed) => parsed,
-                None => continue,
-            };
-
-            if let Some(s) = parsed.structs.iter().find(|s| s.name == type_name) {
-                if seen_structs.insert((s.name.clone(), type_file.clone())) {
-                    structs.push(s.clone());
-                }
-
-                for field in &s.fields {
-                    for t in collect_custom_types_from_rust_type(&field.ty) {
-                        resolve_and_enqueue(
-                            &t,
-                            &type_file,
-                            resolver,
-                            &mut resolved_types,
-                            &mut conflicts,
-                            &mut unresolved,
-                            &mut to_process,
-                            &mut reexport_aliases,
-                        );
-                    }
-                }
-                continue;
-            }
-
-            if let Some(e) = parsed.enums.iter().find(|e| e.name == type_name) {
-                if seen_enums.insert((e.name.clone(), type_file.clone())) {
-                    enums.push(e.clone());
-                }
-
-                for variant in &e.variants {
-                    let nested = match &variant.data {
-                        crate::models::VariantData::Unit => vec![],
-                        crate::models::VariantData::Tuple(types) => types
-                            .iter()
-                            .flat_map(collect_custom_types_from_rust_type)
-                            .collect(),
-                        crate::models::VariantData::Struct(fields) => fields
-                            .iter()
-                            .flat_map(|f| collect_custom_types_from_rust_type(&f.ty))
-                            .collect(),
-                    };
-                    for t in nested {
-                        resolve_and_enqueue(
-                            &t,
-                            &type_file,
-                            resolver,
-                            &mut resolved_types,
-                            &mut conflicts,
-                            &mut unresolved,
-                            &mut to_process,
-                            &mut reexport_aliases,
-                        );
-                    }
-                }
-                continue;
-            }
-
-            if let Some(alias) = parsed.aliases.iter().find(|a| a.name == type_name) {
-                if seen_aliases.insert(alias.name.clone()) {
-                    aliases.push(alias.clone());
-                }
-
-                for t in collect_custom_types_from_rust_type(&alias.target) {
-                    resolve_and_enqueue(
-                        &t,
-                        &alias.source_file,
-                        resolver,
-                        &mut resolved_types,
-                        &mut conflicts,
-                        &mut unresolved,
-                        &mut to_process,
-                        &mut reexport_aliases,
-                    );
-                }
-            }
-        }
-
-        for (alias_name, (original_name, source_file)) in reexport_aliases {
-            if seen_aliases.contains(&alias_name) {
-                continue;
-            }
-
-            let generics = parsed_files
-                .get(&source_file)
-                .and_then(|parsed| {
-                    parsed
-                        .structs
-                        .iter()
-                        .find(|s| s.name == original_name)
-                        .map(|s| s.generics.clone())
-                        .or_else(|| {
-                            parsed
-                                .enums
-                                .iter()
-                                .find(|e| e.name == original_name)
-                                .map(|e| e.generics.clone())
-                        })
-                })
-                .unwrap_or_default();
-
-            aliases.push(RustTypeAlias {
-                name: alias_name,
-                generics,
-                target: RustType::Custom(original_name),
-                source_file,
-            });
-        }
-
-        TypeCollectionResult {
-            structs,
-            enums,
-            aliases,
-            conflicts,
-            unresolved,
-        }
+        collect::collect_reachable_types(commands, resolver, expanded_types, &self.diag)
     }
 
     /// Step 6: Generate TypeScript output files
@@ -687,24 +393,25 @@ impl Pipeline {
     }
 }
 
-/// Collect custom type names from a RustType (returns a sorted, deduped Vec).
-fn collect_custom_types_from_rust_type(ty: &RustType) -> Vec<String> {
-    let mut types: HashSet<String> = HashSet::new();
-    crate::models::walk_custom_type_names(ty, &mut |name| {
-        types.insert(name.to_string());
-    });
-    let mut result: Vec<String> = types.into_iter().collect();
-    result.sort();
-    result
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{CommandArg, TauriCommand};
+    use crate::models::{walk_custom_type_names, CommandArg, TauriCommand};
+    use std::collections::HashSet;
 
     fn test_path() -> PathBuf {
         PathBuf::from("test.rs")
+    }
+
+    /// Test-local wrapper that exercises the shared model walker.
+    fn collect_custom_types_from_rust_type(ty: &RustType) -> Vec<String> {
+        let mut set: HashSet<String> = HashSet::new();
+        walk_custom_type_names(ty, &mut |n| {
+            set.insert(n.to_string());
+        });
+        let mut out: Vec<String> = set.into_iter().collect();
+        out.sort();
+        out
     }
 
     #[test]
