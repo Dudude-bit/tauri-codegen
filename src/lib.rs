@@ -35,6 +35,7 @@
 pub mod cargo_expand;
 pub mod cli;
 pub mod config;
+pub mod diagnostics;
 pub mod generator;
 pub mod known_types;
 pub mod models;
