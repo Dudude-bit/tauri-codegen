@@ -135,7 +135,7 @@ impl ModuleResolver {
                     let name = t.ident.to_string();
                     scope.local_types.insert(name.clone(), TypeKind::Struct); // Treat as struct-like
                     self.register_type_definition(&name, path);
-                    
+
                     // Extract the base type name (e.g., "State" from "State<'a, T>")
                     if let Some(base_type) = extract_base_type_name(&t.ty) {
                         scope.type_aliases.insert(name, base_type);
@@ -172,16 +172,24 @@ impl ModuleResolver {
             UseTree::Name(name) => {
                 let type_name = name.ident.to_string();
                 prefix.push(type_name.clone());
-                scope
-                    .imports
-                    .insert(type_name, ImportedType { path: prefix.clone() });
+                scope.imports.insert(
+                    type_name,
+                    ImportedType {
+                        path: prefix.clone(),
+                    },
+                );
                 prefix.pop();
             }
             UseTree::Rename(rename) => {
                 let original_name = rename.ident.to_string();
                 let alias = rename.rename.to_string();
                 prefix.push(original_name);
-                scope.imports.insert(alias, ImportedType { path: prefix.clone() });
+                scope.imports.insert(
+                    alias,
+                    ImportedType {
+                        path: prefix.clone(),
+                    },
+                );
                 prefix.pop();
             }
             UseTree::Glob(_) => {
@@ -218,7 +226,7 @@ impl ModuleResolver {
     pub fn resolve_type(&self, type_path: &str, from_file: &Path) -> ResolutionResult {
         let segments: Vec<&str> = type_path.split("::").filter(|s| !s.is_empty()).collect();
         let type_name = segments.last().copied().unwrap_or("");
-        
+
         let scope = match self.files.get(from_file) {
             Some(s) => s,
             None => {
@@ -271,23 +279,23 @@ impl ModuleResolver {
             }
             // If multiple found, try to filter by proximity or return ambiguous
             let from_module = &scope.module_path;
-            
+
             // Prioritize siblings (same parent module)
             let siblings: Vec<_> = locations
                 .iter()
                 .filter(|loc| {
-                     if let Some(loc_scope) = self.files.get(*loc) {
+                    if let Some(loc_scope) = self.files.get(*loc) {
                         are_siblings(&loc_scope.module_path, from_module)
-                     } else {
-                         false
-                     }
+                    } else {
+                        false
+                    }
                 })
                 .collect();
-                
+
             if siblings.len() == 1 {
-                 return ResolutionResult::Found(siblings[0].clone());
+                return ResolutionResult::Found(siblings[0].clone());
             }
-            
+
             return ResolutionResult::Ambiguous(locations.clone());
         }
 
@@ -303,7 +311,7 @@ impl ModuleResolver {
     ) -> ResolutionResult {
         let original_name = import_path.last().map(|s| s.as_str()).unwrap_or("");
         let is_alias = original_name != import_name && !original_name.is_empty();
-        
+
         if is_alias {
             match result {
                 ResolutionResult::Found(path) => {
@@ -333,10 +341,10 @@ impl ModuleResolver {
         let path_result = self.resolve_canonical_path(segments, scope);
         match path_result {
             Some(path) => self.resolve_module_path(&path),
-            None => ResolutionResult::NotFound
-        }    
+            None => ResolutionResult::NotFound,
+        }
     }
-    
+
     // Resolve any path tokens to an absolute module path ["crate", "foo", "Type"]
     fn resolve_canonical_path(&self, segments: &[&str], scope: &FileScope) -> Option<Vec<String>> {
         let mut current_path = if segments[0] == "crate" {
@@ -345,19 +353,19 @@ impl ModuleResolver {
             scope.module_path.clone()
         } else {
             // Implicit relative path: `submod::Type` -> start from current module
-             scope.module_path.clone()
+            scope.module_path.clone()
         };
-        
+
         let iter_start = if segments[0] == "crate" { 1 } else { 0 };
 
         for segment in &segments[iter_start..] {
-             match *segment {
+            match *segment {
                 "super" => {
                     if current_path.len() > 1 {
                         current_path.pop();
                     } else {
-                         // Cannot go above root
-                         return None;
+                        // Cannot go above root
+                        return None;
                     }
                 }
                 "self" => {
@@ -376,7 +384,7 @@ impl ModuleResolver {
         if module_path.len() < 2 {
             return ResolutionResult::NotFound;
         }
-        
+
         // Split into module part and type part
         // path: [crate, mod, Type] -> check crate/mod.rs for Type
         let type_name = &module_path[module_path.len() - 1];
@@ -388,7 +396,7 @@ impl ModuleResolver {
                 if scope.local_types.contains_key(type_name) {
                     return ResolutionResult::Found(file_path.clone());
                 }
-                
+
                 // 2. Check re-exports (imports via pub use or use)
                 if let Some(imported) = scope.imports.get(type_name) {
                     // Recursively resolve the imported path relative to THIS module
@@ -396,7 +404,7 @@ impl ModuleResolver {
                     let result = self.resolve_path(&segments, scope);
                     return self.wrap_alias_if_needed(result, type_name, &imported.path);
                 }
-                
+
                 // 3. Check wildcard re-exports (pub use submod::*)
                 for wildcard_path in &scope.wildcard_imports {
                     // Normalize relative path to absolute path
@@ -407,7 +415,7 @@ impl ModuleResolver {
                 }
             }
         }
-        
+
         // 4. Fallback: check type_definitions for types from cargo expand
         // This handles cases where the type is generated by a macro and registered globally
         self.try_resolve_from_definitions(type_name)
@@ -424,19 +432,23 @@ impl ModuleResolver {
         }
         ResolutionResult::NotFound
     }
-    
+
     /// Normalize a relative module path to an absolute path
     /// e.g., ["types"] with context ["crate", "resources"] -> ["crate", "resources", "types"]
-    fn normalize_relative_path(&self, relative_path: &[String], from_module: &[String]) -> Vec<String> {
+    fn normalize_relative_path(
+        &self,
+        relative_path: &[String],
+        from_module: &[String],
+    ) -> Vec<String> {
         if relative_path.is_empty() {
             return from_module.to_vec();
         }
-        
+
         // If path starts with "crate", it's already absolute
         if relative_path.first().map(|s| s.as_str()) == Some("crate") {
             return relative_path.to_vec();
         }
-        
+
         // Handle super:: and self:: in relative paths
         let mut result = from_module.to_vec();
         for segment in relative_path {
@@ -468,7 +480,7 @@ impl ModuleResolver {
         }
         None
     }
-    
+
     /// Resolve a type alias to its final target base type name (follows alias chains)
     /// For example, given "AliasedState" where:
     ///   `type MyState<'a> = State<'a, AppState>;`
@@ -477,7 +489,7 @@ impl ModuleResolver {
     pub fn resolve_alias_target(&self, type_name: &str, from_file: &Path) -> Option<String> {
         let mut current = type_name.to_string();
         let mut found_any = false;
-        
+
         // Follow the alias chain (max 10 iterations to prevent infinite loops)
         for _ in 0..10 {
             let next = self.resolve_single_alias(&current, from_file);
@@ -489,14 +501,14 @@ impl ModuleResolver {
                 None => break,
             }
         }
-        
+
         if found_any {
             Some(current)
         } else {
             None
         }
     }
-    
+
     /// Resolve a single level of type alias (no recursion)
     fn resolve_single_alias(&self, type_name: &str, from_file: &Path) -> Option<String> {
         if let Some(scope) = self.files.get(from_file) {
@@ -504,12 +516,18 @@ impl ModuleResolver {
             if let Some(target) = scope.type_aliases.get(type_name) {
                 return Some(target.clone());
             }
-            
+
             // Check imported type aliases
             if let Some(imported) = scope.imports.get(type_name) {
-                if let ResolutionResult::Found(source_file) = self.resolve_module_path(&imported.path) {
+                if let ResolutionResult::Found(source_file) =
+                    self.resolve_module_path(&imported.path)
+                {
                     if let Some(source_scope) = self.files.get(&source_file) {
-                        let actual_name = imported.path.last().map(|s| s.as_str()).unwrap_or(type_name);
+                        let actual_name = imported
+                            .path
+                            .last()
+                            .map(|s| s.as_str())
+                            .unwrap_or(type_name);
                         if let Some(target) = source_scope.type_aliases.get(actual_name) {
                             return Some(target.clone());
                         }
@@ -517,7 +535,7 @@ impl ModuleResolver {
                 }
             }
         }
-        
+
         // Try to find in any file (for global lookup)
         for (file_path, scope) in &self.files {
             if file_path != from_file {
@@ -526,7 +544,7 @@ impl ModuleResolver {
                 }
             }
         }
-        
+
         None
     }
 }
@@ -552,7 +570,11 @@ fn extract_base_type_name(ty: &syn::Type) -> Option<String> {
     match ty {
         syn::Type::Path(type_path) => {
             // Get the last segment (e.g., "State" from "tauri::State")
-            type_path.path.segments.last().map(|seg| seg.ident.to_string())
+            type_path
+                .path
+                .segments
+                .last()
+                .map(|seg| seg.ident.to_string())
         }
         syn::Type::Reference(type_ref) => {
             // Handle &T or &mut T
@@ -586,23 +608,27 @@ mod tests {
     #[test]
     fn test_resolve_super() {
         let mut resolver = ModuleResolver::new();
-        
+
         // Parent
         let parent_code = "struct User;";
         let parent_path = PathBuf::from("src/mod.rs");
-        resolver.parse_file(&parent_path, parent_code, &base_path()).unwrap();
-        
+        resolver
+            .parse_file(&parent_path, parent_code, &base_path())
+            .unwrap();
+
         // Child
         let child_code = "";
         let child_path = PathBuf::from("src/sub/mod.rs");
-        resolver.parse_file(&child_path, child_code, &base_path()).unwrap();
-        
+        resolver
+            .parse_file(&child_path, child_code, &base_path())
+            .unwrap();
+
         match resolver.resolve_type("super::User", &child_path) {
-             ResolutionResult::Found(p) => assert_eq!(p, parent_path),
-             res => panic!("Failed to resolve super::User: {:?}", res),
+            ResolutionResult::Found(p) => assert_eq!(p, parent_path),
+            res => panic!("Failed to resolve super::User: {:?}", res),
         }
     }
-    
+
     #[test]
     fn test_resolve_path_via_import() {
         let mut resolver = ModuleResolver::new();
@@ -610,14 +636,18 @@ mod tests {
         // Define type in a module: src/types.rs -> User
         let types_code = "struct User;";
         let types_path = PathBuf::from("src/types.rs");
-        resolver.parse_file(&types_path, types_code, &base_path()).unwrap();
+        resolver
+            .parse_file(&types_path, types_code, &base_path())
+            .unwrap();
 
         // Usage file: imports module, uses qualified path
         // use crate::types;
         // ... types::User
         let cmd_code = "use crate::types;";
         let cmd_path = PathBuf::from("src/cmd.rs");
-        resolver.parse_file(&cmd_path, cmd_code, &base_path()).unwrap();
+        resolver
+            .parse_file(&cmd_path, cmd_code, &base_path())
+            .unwrap();
 
         match resolver.resolve_type("types::User", &cmd_path) {
             ResolutionResult::Found(p) => assert_eq!(p, types_path),
@@ -628,22 +658,26 @@ mod tests {
     #[test]
     fn test_resolve_ambiguous() {
         let mut resolver = ModuleResolver::new();
-        
+
         let path_a = PathBuf::from("src/a.rs");
-        resolver.parse_file(&path_a, "struct User;", &base_path()).unwrap();
-        
+        resolver
+            .parse_file(&path_a, "struct User;", &base_path())
+            .unwrap();
+
         let path_b = PathBuf::from("src/b.rs");
-        resolver.parse_file(&path_b, "struct User;", &base_path()).unwrap();
-        
+        resolver
+            .parse_file(&path_b, "struct User;", &base_path())
+            .unwrap();
+
         let path_cmd = PathBuf::from("src/cmd.rs");
         resolver.parse_file(&path_cmd, "", &base_path()).unwrap();
-        
+
         match resolver.resolve_type("User", &path_cmd) {
             ResolutionResult::Ambiguous(paths) => {
                 assert_eq!(paths.len(), 2);
                 assert!(paths.contains(&path_a));
                 assert!(paths.contains(&path_b));
-            },
+            }
             res => panic!("Expected Ambiguous, got {:?}", res),
         }
     }
@@ -653,13 +687,17 @@ mod tests {
         let mut resolver = ModuleResolver::new();
 
         let types_path = PathBuf::from("src/long_name/types.rs");
-        resolver.parse_file(&types_path, "struct User;", &base_path()).unwrap();
+        resolver
+            .parse_file(&types_path, "struct User;", &base_path())
+            .unwrap();
 
         // use crate::long_name::types as t;
         // t::User
         let cmd_code = "use crate::long_name::types as t;";
         let cmd_path = PathBuf::from("src/cmd.rs");
-        resolver.parse_file(&cmd_path, cmd_code, &base_path()).unwrap();
+        resolver
+            .parse_file(&cmd_path, cmd_code, &base_path())
+            .unwrap();
 
         match resolver.resolve_type("t::User", &cmd_path) {
             ResolutionResult::Found(p) => assert_eq!(p, types_path),
@@ -672,7 +710,9 @@ mod tests {
         let mut resolver = ModuleResolver::new();
 
         let target_path = PathBuf::from("src/a/b/c/target.rs");
-        resolver.parse_file(&target_path, "struct Deep;", &base_path()).unwrap();
+        resolver
+            .parse_file(&target_path, "struct Deep;", &base_path())
+            .unwrap();
 
         let cmd_path = PathBuf::from("src/main.rs");
         resolver.parse_file(&cmd_path, "", &base_path()).unwrap();
@@ -688,7 +728,9 @@ mod tests {
         let mut resolver = ModuleResolver::new();
 
         let root_path = PathBuf::from("src/types.rs");
-        resolver.parse_file(&root_path, "struct Top;", &base_path()).unwrap();
+        resolver
+            .parse_file(&root_path, "struct Top;", &base_path())
+            .unwrap();
 
         let deep_path = PathBuf::from("src/a/b/c/deep.rs");
         resolver.parse_file(&deep_path, "", &base_path()).unwrap();
@@ -704,23 +746,27 @@ mod tests {
             res => panic!("Failed to resolve super chain: {:?}", res),
         }
     }
-    
+
     #[test]
     fn test_resolve_sibling_via_super() {
         let mut resolver = ModuleResolver::new();
-        
+
         // src/sibling.rs -> crate::sibling
         let sibling_path = PathBuf::from("src/sibling.rs");
-        resolver.parse_file(&sibling_path, "struct SiblingType;", &base_path()).unwrap();
-        
+        resolver
+            .parse_file(&sibling_path, "struct SiblingType;", &base_path())
+            .unwrap();
+
         // src/current.rs -> crate::current
         let current_path = PathBuf::from("src/current.rs");
-        resolver.parse_file(&current_path, "", &base_path()).unwrap();
-        
+        resolver
+            .parse_file(&current_path, "", &base_path())
+            .unwrap();
+
         // siblings must be accessed via parent (super) if not imported
         match resolver.resolve_type("super::sibling::SiblingType", &current_path) {
-             ResolutionResult::Found(p) => assert_eq!(p, sibling_path),
-             res => panic!("Failed to resolve sibling path via super: {:?}", res),
+            ResolutionResult::Found(p) => assert_eq!(p, sibling_path),
+            res => panic!("Failed to resolve sibling path via super: {:?}", res),
         }
     }
     #[test]
@@ -729,12 +775,16 @@ mod tests {
 
         // src/types.rs -> struct User
         let types_path = PathBuf::from("src/types.rs");
-        resolver.parse_file(&types_path, "pub struct User;", &base_path()).unwrap();
+        resolver
+            .parse_file(&types_path, "pub struct User;", &base_path())
+            .unwrap();
 
         // src/lib.rs -> pub mod types; pub use types::User;
         let lib_path = PathBuf::from("src/lib.rs");
         let lib_code = "pub mod types; pub use types::User;";
-        resolver.parse_file(&lib_path, lib_code, &base_path()).unwrap();
+        resolver
+            .parse_file(&lib_path, lib_code, &base_path())
+            .unwrap();
 
         // Verify lib_path was parsed correctly
         assert!(resolver.files.contains_key(&lib_path));
@@ -742,7 +792,9 @@ mod tests {
         // src/cmd.rs -> use crate::User;
         let main_path = PathBuf::from("src/cmd.rs");
         let main_code = "use crate::User;";
-        resolver.parse_file(&main_path, main_code, &base_path()).unwrap();
+        resolver
+            .parse_file(&main_path, main_code, &base_path())
+            .unwrap();
 
         // Should resolve crate::User to src/types.rs
         match resolver.resolve_type("crate::User", &main_path) {
@@ -757,17 +809,23 @@ mod tests {
 
         // src/resources/types.rs -> struct PodInfo
         let types_path = PathBuf::from("src/resources/types.rs");
-        resolver.parse_file(&types_path, "pub struct PodInfo;", &base_path()).unwrap();
+        resolver
+            .parse_file(&types_path, "pub struct PodInfo;", &base_path())
+            .unwrap();
 
         // src/resources/mod.rs -> pub use types::*;
         let mod_path = PathBuf::from("src/resources/mod.rs");
         let mod_code = "pub use types::*;";
-        resolver.parse_file(&mod_path, mod_code, &base_path()).unwrap();
+        resolver
+            .parse_file(&mod_path, mod_code, &base_path())
+            .unwrap();
 
         // src/commands.rs -> use crate::resources::PodInfo;
         let cmd_path = PathBuf::from("src/commands.rs");
         let cmd_code = "use crate::resources::PodInfo;";
-        resolver.parse_file(&cmd_path, cmd_code, &base_path()).unwrap();
+        resolver
+            .parse_file(&cmd_path, cmd_code, &base_path())
+            .unwrap();
 
         // Should resolve crate::resources::PodInfo via wildcard re-export to src/resources/types.rs
         match resolver.resolve_type("crate::resources::PodInfo", &cmd_path) {
@@ -782,12 +840,16 @@ mod tests {
 
         // src/types.rs -> struct User
         let types_path = PathBuf::from("src/types.rs");
-        resolver.parse_file(&types_path, "pub struct User;", &base_path()).unwrap();
+        resolver
+            .parse_file(&types_path, "pub struct User;", &base_path())
+            .unwrap();
 
         // src/main.rs -> use types::*;
         let main_path = PathBuf::from("src/main.rs");
         let main_code = "use types::*;";
-        resolver.parse_file(&main_path, main_code, &base_path()).unwrap();
+        resolver
+            .parse_file(&main_path, main_code, &base_path())
+            .unwrap();
 
         // Should resolve User via wildcard import
         match resolver.resolve_type("User", &main_path) {
@@ -804,7 +866,7 @@ mod tests {
         let relative = vec!["types".to_string()];
         let from_module = vec!["crate".to_string(), "resources".to_string()];
         let result = resolver.normalize_relative_path(&relative, &from_module);
-        
+
         assert_eq!(result, vec!["crate", "resources", "types"]);
     }
 
@@ -816,7 +878,7 @@ mod tests {
         let relative = vec!["super".to_string(), "other".to_string()];
         let from_module = vec!["crate".to_string(), "foo".to_string(), "bar".to_string()];
         let result = resolver.normalize_relative_path(&relative, &from_module);
-        
+
         assert_eq!(result, vec!["crate", "foo", "other"]);
     }
 
@@ -828,7 +890,7 @@ mod tests {
         let absolute = vec!["crate".to_string(), "types".to_string()];
         let from_module = vec!["crate".to_string(), "other".to_string()];
         let result = resolver.normalize_relative_path(&absolute, &from_module);
-        
+
         assert_eq!(result, vec!["crate", "types"]);
     }
 
@@ -838,15 +900,21 @@ mod tests {
 
         // src/inner/types.rs -> struct DeepType
         let deep_types_path = PathBuf::from("src/inner/types.rs");
-        resolver.parse_file(&deep_types_path, "pub struct DeepType;", &base_path()).unwrap();
+        resolver
+            .parse_file(&deep_types_path, "pub struct DeepType;", &base_path())
+            .unwrap();
 
         // src/inner/mod.rs -> pub use types::*;
         let inner_mod_path = PathBuf::from("src/inner/mod.rs");
-        resolver.parse_file(&inner_mod_path, "pub use types::*;", &base_path()).unwrap();
+        resolver
+            .parse_file(&inner_mod_path, "pub use types::*;", &base_path())
+            .unwrap();
 
         // src/lib.rs -> pub use inner::*;
         let lib_path = PathBuf::from("src/lib.rs");
-        resolver.parse_file(&lib_path, "pub use inner::*;", &base_path()).unwrap();
+        resolver
+            .parse_file(&lib_path, "pub use inner::*;", &base_path())
+            .unwrap();
 
         // Should resolve crate::inner::DeepType via wildcard in inner/mod.rs
         let cmd_path = PathBuf::from("src/cmd.rs");
@@ -864,16 +932,22 @@ mod tests {
 
         // src/a.rs -> struct TypeA
         let a_path = PathBuf::from("src/a.rs");
-        resolver.parse_file(&a_path, "pub struct TypeA;", &base_path()).unwrap();
+        resolver
+            .parse_file(&a_path, "pub struct TypeA;", &base_path())
+            .unwrap();
 
         // src/b.rs -> struct TypeB
         let b_path = PathBuf::from("src/b.rs");
-        resolver.parse_file(&b_path, "pub struct TypeB;", &base_path()).unwrap();
+        resolver
+            .parse_file(&b_path, "pub struct TypeB;", &base_path())
+            .unwrap();
 
         // src/lib.rs -> pub use a::TypeA; pub use b::*;
         let lib_path = PathBuf::from("src/lib.rs");
         let lib_code = "pub use a::TypeA; pub use b::*;";
-        resolver.parse_file(&lib_path, lib_code, &base_path()).unwrap();
+        resolver
+            .parse_file(&lib_path, lib_code, &base_path())
+            .unwrap();
 
         let cmd_path = PathBuf::from("src/cmd.rs");
         resolver.parse_file(&cmd_path, "", &base_path()).unwrap();
@@ -990,7 +1064,7 @@ mod tests {
         // resolve_alias_target should return the base type name
         let target = resolver.resolve_alias_target("AliasType", &path);
         assert_eq!(target, Some("RealType".to_string()));
-        
+
         // Non-alias types should return None
         let no_target = resolver.resolve_alias_target("RealType", &path);
         assert_eq!(no_target, None);
@@ -1024,8 +1098,14 @@ mod tests {
         resolver.parse_file(&path, code, &base_path()).unwrap();
 
         // Both should resolve to their base types
-        assert_eq!(resolver.resolve_alias_target("MyWindow", &path), Some("Window".to_string()));
-        assert_eq!(resolver.resolve_alias_target("MyHandle", &path), Some("AppHandle".to_string()));
+        assert_eq!(
+            resolver.resolve_alias_target("MyWindow", &path),
+            Some("Window".to_string())
+        );
+        assert_eq!(
+            resolver.resolve_alias_target("MyHandle", &path),
+            Some("AppHandle".to_string())
+        );
     }
 
     #[test]
@@ -1040,7 +1120,10 @@ mod tests {
 
         // Check that the alias is stored in the scope
         let scope = resolver.files.get(&path).unwrap();
-        assert_eq!(scope.type_aliases.get("CustomState"), Some(&"State".to_string()));
+        assert_eq!(
+            scope.type_aliases.get("CustomState"),
+            Some(&"State".to_string())
+        );
     }
 
     #[test]
@@ -1081,7 +1164,9 @@ mod tests {
             }
         "#;
         let types_path = PathBuf::from("src/resources/types.rs");
-        resolver.parse_file(&types_path, types_code, &base_path()).unwrap();
+        resolver
+            .parse_file(&types_path, types_code, &base_path())
+            .unwrap();
 
         // workloads.rs uses DeploymentContainerInfo via import
         let workloads_code = r#"
@@ -1092,11 +1177,20 @@ mod tests {
             }
         "#;
         let workloads_path = PathBuf::from("src/resources/workloads.rs");
-        resolver.parse_file(&workloads_path, workloads_code, &base_path()).unwrap();
+        resolver
+            .parse_file(&workloads_path, workloads_code, &base_path())
+            .unwrap();
 
         // DeploymentContainerInfo should only be registered once (from types.rs)
-        let locations = resolver.type_definitions.get("DeploymentContainerInfo").unwrap();
-        assert_eq!(locations.len(), 1, "Type should only be registered once, not duplicated");
+        let locations = resolver
+            .type_definitions
+            .get("DeploymentContainerInfo")
+            .unwrap();
+        assert_eq!(
+            locations.len(),
+            1,
+            "Type should only be registered once, not duplicated"
+        );
         assert_eq!(locations[0], types_path);
 
         // Resolving the type from workloads.rs should find it (not be ambiguous)
@@ -1117,14 +1211,22 @@ mod tests {
 
         // Two different files both define a type with the same name
         let file_a = PathBuf::from("src/a.rs");
-        resolver.parse_file(&file_a, "pub struct SharedName;", &base_path()).unwrap();
+        resolver
+            .parse_file(&file_a, "pub struct SharedName;", &base_path())
+            .unwrap();
 
         let file_b = PathBuf::from("src/b.rs");
-        resolver.parse_file(&file_b, "pub struct SharedName;", &base_path()).unwrap();
+        resolver
+            .parse_file(&file_b, "pub struct SharedName;", &base_path())
+            .unwrap();
 
         // This SHOULD be ambiguous because the type is defined in two places
         let locations = resolver.type_definitions.get("SharedName").unwrap();
-        assert_eq!(locations.len(), 2, "Type defined in 2 files should have 2 locations");
+        assert_eq!(
+            locations.len(),
+            2,
+            "Type defined in 2 files should have 2 locations"
+        );
 
         let query_path = PathBuf::from("src/main.rs");
         resolver.parse_file(&query_path, "", &base_path()).unwrap();
@@ -1160,21 +1262,39 @@ mod tests {
                 pub name: String,
             }
         "#;
-        resolver.parse_file(&types_path, types_code, &base_path()).unwrap();
+        resolver
+            .parse_file(&types_path, types_code, &base_path())
+            .unwrap();
 
         // Verify type is registered exactly once from the source file
-        let locations = resolver.type_definitions.get("DeploymentContainerInfo").unwrap();
+        let locations = resolver
+            .type_definitions
+            .get("DeploymentContainerInfo")
+            .unwrap();
         assert_eq!(locations.len(), 1, "Type should be registered only once");
-        assert_eq!(locations[0], types_path, "Type should be registered from source file");
+        assert_eq!(
+            locations[0], types_path,
+            "Type should be registered from source file"
+        );
 
         // Now try to register the same type from cargo-expand - should be ignored
         let expanded_path = PathBuf::from("<cargo-expand>");
         resolver.register_expanded_type_if_missing("DeploymentContainerInfo", &expanded_path);
 
         // Type should STILL be registered only once (cargo-expand was ignored)
-        let locations = resolver.type_definitions.get("DeploymentContainerInfo").unwrap();
-        assert_eq!(locations.len(), 1, "Cargo-expand should not duplicate source file types");
-        assert_eq!(locations[0], types_path, "Source file registration should be preserved");
+        let locations = resolver
+            .type_definitions
+            .get("DeploymentContainerInfo")
+            .unwrap();
+        assert_eq!(
+            locations.len(),
+            1,
+            "Cargo-expand should not duplicate source file types"
+        );
+        assert_eq!(
+            locations[0], types_path,
+            "Source file registration should be preserved"
+        );
 
         // Simulate another file that USES (not defines) the type
         let workloads_path = PathBuf::from("src/resources/workloads.rs");
@@ -1185,11 +1305,20 @@ mod tests {
                 pub containers: Vec<DeploymentContainerInfo>,
             }
         "#;
-        resolver.parse_file(&workloads_path, workloads_code, &base_path()).unwrap();
+        resolver
+            .parse_file(&workloads_path, workloads_code, &base_path())
+            .unwrap();
 
         // Type should STILL be registered only once (imports don't register types)
-        let locations = resolver.type_definitions.get("DeploymentContainerInfo").unwrap();
-        assert_eq!(locations.len(), 1, "Importing a type should not register it again");
+        let locations = resolver
+            .type_definitions
+            .get("DeploymentContainerInfo")
+            .unwrap();
+        assert_eq!(
+            locations.len(),
+            1,
+            "Importing a type should not register it again"
+        );
 
         // Resolution should find the type without ambiguity
         match resolver.resolve_type("DeploymentContainerInfo", &workloads_path) {
@@ -1221,10 +1350,12 @@ mod tests {
                 pub value: i32,
             }
         "#;
-        resolver.parse_file(&source_path, source_code, &base_path()).unwrap();
+        resolver
+            .parse_file(&source_path, source_code, &base_path())
+            .unwrap();
 
         // MacroGeneratedType doesn't exist in source - verify it's not registered
-        assert!(resolver.type_definitions.get("MacroGeneratedType").is_none());
+        assert!(!resolver.type_definitions.contains_key("MacroGeneratedType"));
 
         // Register a macro-generated type from cargo-expand
         // This simulates what pipeline.rs does after parsing source files

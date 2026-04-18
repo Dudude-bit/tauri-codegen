@@ -25,4 +25,3 @@ pub enum RustType {
     /// Unknown type (fallback)
     Unknown(String),
 }
-

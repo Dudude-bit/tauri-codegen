@@ -1,8 +1,8 @@
 //! Integration tests for parsing Rust source files
 
 use std::path::PathBuf;
-use tauri_ts_generator::parser::{parse_commands, parse_types};
 use tauri_ts_generator::models::RustType;
+use tauri_ts_generator::parser::{parse_commands, parse_types};
 
 /// Get path to test fixtures
 fn fixture_path(name: &str) -> PathBuf {
@@ -88,7 +88,10 @@ fn test_parse_simple_types_fixture() {
     assert!(user.fields.iter().any(|f| f.name == "email"));
 
     // Check CreateUserRequest struct
-    let request = structs.iter().find(|s| s.name == "CreateUserRequest").unwrap();
+    let request = structs
+        .iter()
+        .find(|s| s.name == "CreateUserRequest")
+        .unwrap();
     assert_eq!(request.fields.len(), 2);
 
     // Check Status enum
@@ -116,7 +119,10 @@ fn test_parse_complex_types_fixture() {
     assert_eq!(pair.generics, vec!["K", "V"]);
 
     // Check PaginatedResponse<T>
-    let paginated = structs.iter().find(|s| s.name == "PaginatedResponse").unwrap();
+    let paginated = structs
+        .iter()
+        .find(|s| s.name == "PaginatedResponse")
+        .unwrap();
     assert_eq!(paginated.generics, vec!["T"]);
 
     // Check Message enum with complex variants
@@ -147,4 +153,3 @@ fn test_parse_nested_modules_fixture() {
     assert!(structs.iter().any(|s| s.name == "OuterType"));
     assert!(enums.iter().any(|e| e.name == "InnerEnum"));
 }
-

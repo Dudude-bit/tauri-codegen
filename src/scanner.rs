@@ -41,9 +41,7 @@ impl Scanner {
 
     /// Check if a path is a Rust source file
     fn is_rust_file(&self, path: &Path) -> bool {
-        path.extension()
-            .map(|ext| ext == "rs")
-            .unwrap_or(false)
+        path.extension().map(|ext| ext == "rs").unwrap_or(false)
     }
 
     /// Check if a path should be excluded
@@ -239,4 +237,3 @@ mod tests {
         assert_eq!(scanner.exclude_patterns.len(), 2);
     }
 }
-

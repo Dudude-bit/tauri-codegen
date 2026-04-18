@@ -36,11 +36,11 @@ pub fn rust_to_typescript(rust_type: &RustType, ctx: &GeneratorContext) -> Strin
         RustType::HashMap { key, value } => {
             let key_ts = rust_to_typescript(key, ctx);
             let value_ts = rust_to_typescript(value, ctx);
-            
+
             // Check if strict key usage is safe for TypeScript Record
             let use_param_key = match &**key {
                 // bool keys become strings in JSON ("true"/"false") but are invalid in TS Record<bool, ...>
-                RustType::Primitive(p) if p == "bool" => false, 
+                RustType::Primitive(p) if p == "bool" => false,
                 // numbers/strings are fine
                 RustType::Primitive(_) => true,
                 // Custom types (enums, newtypes) are assumed to be valid string/number keys
@@ -96,7 +96,7 @@ fn primitive_to_typescript(name: &str) -> String {
     if let Some(ts_type) = known_types::primitive_to_typescript(name) {
         return ts_type.to_string();
     }
-    
+
     eprintln!(
         "Warning: Unknown primitive type '{}', using 'unknown'",
         name

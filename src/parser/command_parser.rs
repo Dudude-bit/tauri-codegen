@@ -64,7 +64,7 @@ fn is_tauri_command_attr(attr: &syn::Attribute) -> bool {
         syn::Meta::List(list) => &list.path,
         _ => return false,
     };
-    
+
     let segments: Vec<_> = path.segments.iter().map(|s| s.ident.to_string()).collect();
     // Check for #[tauri::command] or #[command]
     (segments.len() == 2 && segments[0] == "tauri" && segments[1] == "command")
@@ -82,7 +82,7 @@ fn extract_rename_all(attrs: &[syn::Attribute]) -> Option<String> {
         if !is_tauri_command_attr(attr) {
             continue;
         }
-        
+
         if let syn::Meta::List(list) = &attr.meta {
             // Parse the tokens inside the parentheses
             let tokens = list.tokens.clone();
@@ -125,12 +125,20 @@ fn parse_command_from_signature(
 
 /// Parse a function into a TauriCommand
 fn parse_command_fn(func: &ItemFn, source_file: &Path) -> Option<TauriCommand> {
-    Some(parse_command_from_signature(&func.sig, &func.attrs, source_file))
+    Some(parse_command_from_signature(
+        &func.sig,
+        &func.attrs,
+        source_file,
+    ))
 }
 
 /// Parse a method into a TauriCommand
 fn parse_command_method(method: &syn::ImplItemFn, source_file: &Path) -> Option<TauriCommand> {
-    Some(parse_command_from_signature(&method.sig, &method.attrs, source_file))
+    Some(parse_command_from_signature(
+        &method.sig,
+        &method.attrs,
+        source_file,
+    ))
 }
 
 /// Parse a function argument
@@ -437,4 +445,3 @@ mod tests {
         assert_eq!(commands[0].rename_all, Some("snake_case".to_string()));
     }
 }
-

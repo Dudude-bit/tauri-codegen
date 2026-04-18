@@ -1,11 +1,14 @@
 use crate::models::{
     EnumRepresentation, EnumVariant, RustEnum, RustStruct, RustTypeAlias, StructField, VariantData,
 };
-use crate::utils::{to_camel_case, to_kebab_case, to_pascal_case, to_screaming_kebab_case, to_screaming_snake_case, to_snake_case};
+use crate::utils::{
+    to_camel_case, to_kebab_case, to_pascal_case, to_screaming_kebab_case, to_screaming_snake_case,
+    to_snake_case,
+};
 use anyhow::Result;
 use std::collections::HashSet;
 use std::path::Path;
-use syn::{Fields, Item, ItemEnum, ItemStruct, Expr, Lit, Meta};
+use syn::{Expr, Fields, Item, ItemEnum, ItemStruct, Lit, Meta};
 
 use super::type_extractor::parse_type_with_context;
 
@@ -52,10 +55,7 @@ pub fn parse_types_with_aliases(content: &str, source_file: &Path) -> Result<Par
 }
 
 /// Parse expanded Rust code (from cargo expand) and extract structs, enums, and type aliases
-pub fn parse_types_expanded_with_aliases(
-    content: &str,
-    source_file: &Path,
-) -> Result<ParsedTypes> {
+pub fn parse_types_expanded_with_aliases(content: &str, source_file: &Path) -> Result<ParsedTypes> {
     parse_types_internal(content, source_file, true, true)
 }
 
@@ -125,10 +125,12 @@ fn collect_serializable_types_recursive(items: &[Item], result: &mut HashSet<Str
 /// Check if an impl block is for Serialize/Deserialize and extract the type name
 fn check_serde_impl(item_impl: &syn::ItemImpl, result: &mut HashSet<String>) {
     if let Some((_, trait_path, _)) = &item_impl.trait_ {
-        let trait_name = trait_path.segments.last()
+        let trait_name = trait_path
+            .segments
+            .last()
             .map(|s| s.ident.to_string())
             .unwrap_or_default();
-        
+
         if trait_name == "Serialize" || trait_name == "Deserialize" {
             // Extract the type name from self_ty
             if let syn::Type::Path(type_path) = &*item_impl.self_ty {
@@ -157,13 +159,13 @@ fn parse_items(
                     true
                 } else if expanded {
                     // For expanded code: check impl Serialize/Deserialize OR serde attrs on fields
-                    serializable_types.contains(&name) 
-                        || is_serializable(&item_struct.attrs) 
+                    serializable_types.contains(&name)
+                        || is_serializable(&item_struct.attrs)
                         || has_serde_field_attrs(item_struct)
                 } else {
                     is_serializable(&item_struct.attrs)
                 };
-                
+
                 if should_include {
                     if let Some(s) = parse_struct(item_struct, source_file) {
                         parsed.structs.push(s);
@@ -177,12 +179,12 @@ fn parse_items(
                 } else if expanded {
                     // For expanded code: check impl Serialize/Deserialize OR serde attrs on variants
                     serializable_types.contains(&name)
-                        || is_serializable(&item_enum.attrs) 
+                        || is_serializable(&item_enum.attrs)
                         || has_serde_variant_attrs(item_enum)
                 } else {
                     is_serializable(&item_enum.attrs)
                 };
-                
+
                 if should_include {
                     if let Some(e) = parse_enum(item_enum, source_file) {
                         parsed.enums.push(e);
@@ -451,10 +453,12 @@ fn parse_enum(item: &ItemEnum, source_file: &Path) -> Option<RustEnum> {
 
             // Check for serde rename attribute on variant
             let explicit_rename = get_serde_rename(&variant.attrs);
-            let final_name = explicit_rename.clone()
+            let final_name = explicit_rename
+                .clone()
                 .or_else(|| apply_rename_all(&variant_name, &container_attrs.rename_all))
                 .unwrap_or(variant_name.clone());
-            let has_explicit_rename = explicit_rename.is_some() || container_attrs.rename_all.is_some();
+            let has_explicit_rename =
+                explicit_rename.is_some() || container_attrs.rename_all.is_some();
 
             let data = match &variant.fields {
                 Fields::Unit => VariantData::Unit,
@@ -688,8 +692,6 @@ fn apply_rename_all(name: &str, rename_all: &Option<String>) -> Option<String> {
     })
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -716,10 +718,16 @@ mod tests {
         let config = &structs[0];
 
         assert_eq!(config.fields[0].name, "volume");
-        assert!(config.fields[0].use_optional, "Option field with #[ts(optional)] should have use_optional=true");
-        
+        assert!(
+            config.fields[0].use_optional,
+            "Option field with #[ts(optional)] should have use_optional=true"
+        );
+
         assert_eq!(config.fields[1].name, "name");
-        assert!(!config.fields[1].use_optional, "Option field without attribute should have use_optional=false");
+        assert!(
+            !config.fields[1].use_optional,
+            "Option field without attribute should have use_optional=false"
+        );
     }
 
     #[test]
@@ -738,7 +746,10 @@ mod tests {
         let config = &structs[0];
 
         assert_eq!(config.fields[0].name, "count");
-        assert!(!config.fields[0].use_optional, "Non-Option field should ignore ts(optional)");
+        assert!(
+            !config.fields[0].use_optional,
+            "Non-Option field should ignore ts(optional)"
+        );
     }
 
     #[test]
@@ -757,19 +768,17 @@ mod tests {
         let (_, enums) = parse_types(code, &test_path()).unwrap();
         assert_eq!(enums.len(), 1);
         let settings = &enums[0];
-        
+
         match &settings.variants[0].data {
             VariantData::Struct(fields) => {
                 assert_eq!(fields[0].name, "proxy");
                 assert!(fields[0].use_optional);
                 assert_eq!(fields[1].name, "port");
                 assert!(!fields[1].use_optional);
-            },
+            }
             _ => panic!("Expected Struct variant"),
         }
     }
-
-
 
     #[test]
     fn test_parse_simple_struct() {
@@ -960,9 +969,15 @@ mod tests {
 
         let user = &structs[0];
         assert_eq!(user.fields[0].name, "userId");
-        assert!(user.fields[0].has_explicit_rename, "Field with serde rename should have has_explicit_rename = true");
+        assert!(
+            user.fields[0].has_explicit_rename,
+            "Field with serde rename should have has_explicit_rename = true"
+        );
         assert_eq!(user.fields[1].name, "name");
-        assert!(!user.fields[1].has_explicit_rename, "Field without serde rename should have has_explicit_rename = false");
+        assert!(
+            !user.fields[1].has_explicit_rename,
+            "Field without serde rename should have has_explicit_rename = false"
+        );
     }
 
     #[test]
@@ -989,27 +1004,75 @@ mod tests {
     #[test]
     fn test_apply_rename_all_all_conventions_for_fields() {
         let field = "user_id";
-        assert_eq!(apply_rename_all(field, &Some("lowercase".into())).unwrap(), "user_id");
-        assert_eq!(apply_rename_all(field, &Some("UPPERCASE".into())).unwrap(), "USER_ID");
-        assert_eq!(apply_rename_all(field, &Some("camelCase".into())).unwrap(), "userId");
-        assert_eq!(apply_rename_all(field, &Some("PascalCase".into())).unwrap(), "UserId");
-        assert_eq!(apply_rename_all(field, &Some("snake_case".into())).unwrap(), "user_id");
-        assert_eq!(apply_rename_all(field, &Some("SCREAMING_SNAKE_CASE".into())).unwrap(), "USER_ID");
-        assert_eq!(apply_rename_all(field, &Some("kebab-case".into())).unwrap(), "user-id");
-        assert_eq!(apply_rename_all(field, &Some("SCREAMING-KEBAB-CASE".into())).unwrap(), "USER-ID");
+        assert_eq!(
+            apply_rename_all(field, &Some("lowercase".into())).unwrap(),
+            "user_id"
+        );
+        assert_eq!(
+            apply_rename_all(field, &Some("UPPERCASE".into())).unwrap(),
+            "USER_ID"
+        );
+        assert_eq!(
+            apply_rename_all(field, &Some("camelCase".into())).unwrap(),
+            "userId"
+        );
+        assert_eq!(
+            apply_rename_all(field, &Some("PascalCase".into())).unwrap(),
+            "UserId"
+        );
+        assert_eq!(
+            apply_rename_all(field, &Some("snake_case".into())).unwrap(),
+            "user_id"
+        );
+        assert_eq!(
+            apply_rename_all(field, &Some("SCREAMING_SNAKE_CASE".into())).unwrap(),
+            "USER_ID"
+        );
+        assert_eq!(
+            apply_rename_all(field, &Some("kebab-case".into())).unwrap(),
+            "user-id"
+        );
+        assert_eq!(
+            apply_rename_all(field, &Some("SCREAMING-KEBAB-CASE".into())).unwrap(),
+            "USER-ID"
+        );
     }
 
     #[test]
     fn test_apply_rename_all_all_conventions_for_variants() {
         let variant = "GetUser";
-        assert_eq!(apply_rename_all(variant, &Some("lowercase".into())).unwrap(), "getuser");
-        assert_eq!(apply_rename_all(variant, &Some("UPPERCASE".into())).unwrap(), "GETUSER");
-        assert_eq!(apply_rename_all(variant, &Some("camelCase".into())).unwrap(), "getUser");
-        assert_eq!(apply_rename_all(variant, &Some("PascalCase".into())).unwrap(), "GetUser");
-        assert_eq!(apply_rename_all(variant, &Some("snake_case".into())).unwrap(), "get_user");
-        assert_eq!(apply_rename_all(variant, &Some("SCREAMING_SNAKE_CASE".into())).unwrap(), "GET_USER");
-        assert_eq!(apply_rename_all(variant, &Some("kebab-case".into())).unwrap(), "get-user");
-        assert_eq!(apply_rename_all(variant, &Some("SCREAMING-KEBAB-CASE".into())).unwrap(), "GET-USER");
+        assert_eq!(
+            apply_rename_all(variant, &Some("lowercase".into())).unwrap(),
+            "getuser"
+        );
+        assert_eq!(
+            apply_rename_all(variant, &Some("UPPERCASE".into())).unwrap(),
+            "GETUSER"
+        );
+        assert_eq!(
+            apply_rename_all(variant, &Some("camelCase".into())).unwrap(),
+            "getUser"
+        );
+        assert_eq!(
+            apply_rename_all(variant, &Some("PascalCase".into())).unwrap(),
+            "GetUser"
+        );
+        assert_eq!(
+            apply_rename_all(variant, &Some("snake_case".into())).unwrap(),
+            "get_user"
+        );
+        assert_eq!(
+            apply_rename_all(variant, &Some("SCREAMING_SNAKE_CASE".into())).unwrap(),
+            "GET_USER"
+        );
+        assert_eq!(
+            apply_rename_all(variant, &Some("kebab-case".into())).unwrap(),
+            "get-user"
+        );
+        assert_eq!(
+            apply_rename_all(variant, &Some("SCREAMING-KEBAB-CASE".into())).unwrap(),
+            "GET-USER"
+        );
     }
 
     #[test]
@@ -1079,9 +1142,15 @@ mod tests {
 
         let status = &enums[0];
         assert_eq!(status.variants[0].name, "ACTIVE");
-        assert!(status.variants[0].has_explicit_rename, "Variant with serde rename should have has_explicit_rename = true");
+        assert!(
+            status.variants[0].has_explicit_rename,
+            "Variant with serde rename should have has_explicit_rename = true"
+        );
         assert_eq!(status.variants[1].name, "INACTIVE");
-        assert!(status.variants[1].has_explicit_rename, "Variant with serde rename should have has_explicit_rename = true");
+        assert!(
+            status.variants[1].has_explicit_rename,
+            "Variant with serde rename should have has_explicit_rename = true"
+        );
     }
 
     #[test]
@@ -1204,7 +1273,7 @@ mod tests {
                 }
             }
         "#;
-        
+
         let (structs, _) = super::parse_types_expanded(code, &test_path()).unwrap();
         assert_eq!(structs.len(), 1, "Should find AuthResponse struct");
         assert_eq!(structs[0].name, "AuthResponse");
@@ -1220,9 +1289,13 @@ mod tests {
                 pub name: String,
             }
         "#;
-        
+
         let (structs, _) = super::parse_types_expanded(code, &test_path()).unwrap();
-        assert_eq!(structs.len(), 1, "Should find User struct via serde field attrs");
+        assert_eq!(
+            structs.len(),
+            1,
+            "Should find User struct via serde field attrs"
+        );
         assert_eq!(structs[0].name, "User");
     }
 
@@ -1237,7 +1310,11 @@ mod tests {
         "#;
 
         let (structs, _) = super::parse_types(code, &test_path()).unwrap();
-        assert_eq!(structs.len(), 0, "Regular parse should not find struct without derive");
+        assert_eq!(
+            structs.len(),
+            0,
+            "Regular parse should not find struct without derive"
+        );
     }
 
     #[test]
@@ -1328,10 +1405,16 @@ mod tests {
         assert_eq!(user.fields.len(), 2);
 
         assert_eq!(user.fields[0].name, "name");
-        assert!(!user.fields[0].is_flatten, "Regular field should not be flattened");
+        assert!(
+            !user.fields[0].is_flatten,
+            "Regular field should not be flattened"
+        );
 
         assert_eq!(user.fields[1].name, "address");
-        assert!(user.fields[1].is_flatten, "Field with #[serde(flatten)] should be flattened");
+        assert!(
+            user.fields[1].is_flatten,
+            "Field with #[serde(flatten)] should be flattened"
+        );
     }
 
     #[test]
@@ -1362,8 +1445,8 @@ mod tests {
 
         assert_eq!(user.fields.len(), 3);
         assert!(!user.fields[0].is_flatten); // name
-        assert!(user.fields[1].is_flatten);  // address
-        assert!(user.fields[2].is_flatten);  // meta
+        assert!(user.fields[1].is_flatten); // address
+        assert!(user.fields[2].is_flatten); // meta
     }
 
     #[test]

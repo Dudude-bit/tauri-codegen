@@ -7,7 +7,6 @@
 
 use tauri_ts_generator_derive::TS;
 
-
 /// Test: Basic derive on empty struct compiles
 #[derive(TS)]
 struct EmptyStruct;
@@ -81,15 +80,27 @@ struct ComplexTypes {
 fn test_derive_compiles() {
     // This test just needs to compile - if it compiles, the derive macro works
     let _ = EmptyStruct;
-    let _ = ConfigWithOptional { volume: Some(0.5), name: "test".to_string() };
-    let _ = MultipleOptionals { field_a: None, field_b: Some(42), normal_field: "test".to_string() };
-    let _ = GenericStruct::<String> { data: Some("hello".to_string()) };
+    let _ = ConfigWithOptional {
+        volume: Some(0.5),
+        name: "test".to_string(),
+    };
+    let _ = MultipleOptionals {
+        field_a: None,
+        field_b: Some(42),
+        normal_field: "test".to_string(),
+    };
+    let _ = GenericStruct::<String> {
+        data: Some("hello".to_string()),
+    };
     let _ = Status::Active;
     let _ = Event::Click { x: 10, y: 20 };
     let _ = Event::Config { volume: Some(1.0) };
     let _ = WithOtherDerives { value: None };
     let _ = TupleStruct("test".to_string(), 42);
-    let _ = ComplexTypes { nested_option: None, vec_option: Some(vec![1, 2, 3]) };
+    let _ = ComplexTypes {
+        nested_option: None,
+        vec_option: Some(vec![1, 2, 3]),
+    };
 }
 
 #[test]
@@ -107,7 +118,7 @@ fn test_derive_with_serde_like_usage() {
         volume_normalized: Some(0.8),
         volume_absolute: None,
     };
-    
+
     // If this compiles and runs, the derive macro is working correctly
     assert!(request.volume_normalized.is_some());
     assert!(request.volume_absolute.is_none());

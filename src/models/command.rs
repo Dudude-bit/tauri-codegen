@@ -26,4 +26,3 @@ pub struct CommandArg {
     /// Argument type
     pub ty: RustType,
 }
-

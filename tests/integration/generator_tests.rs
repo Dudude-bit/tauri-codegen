@@ -6,8 +6,8 @@ use tauri_ts_generator::generator::{
     commands_gen::generate_commands_file, types_gen::generate_types_file, GeneratorContext,
 };
 use tauri_ts_generator::models::{
-    CommandArg, EnumRepresentation, EnumVariant, RustEnum, RustStruct, RustType, StructField, TauriCommand,
-    VariantData,
+    CommandArg, EnumRepresentation, EnumVariant, RustEnum, RustStruct, RustType, StructField,
+    TauriCommand, VariantData,
 };
 use tauri_ts_generator::parser::{parse_commands, parse_types};
 
@@ -155,7 +155,8 @@ fn test_generate_with_naming_prefix() {
             name: "id".to_string(),
             ty: RustType::Primitive("i32".to_string()),
             has_explicit_rename: false,
-            use_optional: false, is_flatten: false,
+            use_optional: false,
+            is_flatten: false,
         }],
         source_file: PathBuf::from("test.rs"),
     }];
@@ -165,7 +166,7 @@ fn test_generate_with_naming_prefix() {
         type_suffix: "".to_string(),
         function_prefix: "".to_string(),
         function_suffix: "".to_string(),
-            });
+    });
     ctx.register_type("User");
 
     let output = generate_types_file(&structs, &[], &[], &ctx);
@@ -187,7 +188,7 @@ fn test_generate_with_naming_suffix() {
         type_suffix: "DTO".to_string(),
         function_prefix: "".to_string(),
         function_suffix: "".to_string(),
-            });
+    });
     ctx.register_type("User");
 
     let output = generate_types_file(&structs, &[], &[], &ctx);
@@ -210,7 +211,7 @@ fn test_generate_command_with_function_prefix_suffix() {
         type_suffix: "".to_string(),
         function_prefix: "api".to_string(),
         function_suffix: "Cmd".to_string(),
-            });
+    });
     ctx.register_type("User");
 
     let types_path = PathBuf::from("./types.ts");
@@ -298,19 +299,22 @@ fn test_field_names_match_serde_behavior() {
                 name: "user_id".to_string(), // No serde rename -> stays user_id
                 ty: RustType::Primitive("i32".to_string()),
                 has_explicit_rename: false,
-                use_optional: false, is_flatten: false,
+                use_optional: false,
+                is_flatten: false,
             },
             StructField {
                 name: "firstName".to_string(), // serde(rename_all="camelCase") applied
                 ty: RustType::Primitive("String".to_string()),
                 has_explicit_rename: true,
-                use_optional: false, is_flatten: false,
+                use_optional: false,
+                is_flatten: false,
             },
             StructField {
                 name: "CUSTOM_NAME".to_string(), // serde(rename="CUSTOM_NAME") applied
                 ty: RustType::Primitive("DateTime".to_string()),
                 has_explicit_rename: true,
-                use_optional: false, is_flatten: false,
+                use_optional: false,
+                is_flatten: false,
             },
         ],
         source_file: PathBuf::from("test.rs"),
@@ -341,13 +345,15 @@ fn test_complex_enum_discriminated_union() {
                         name: "x".to_string(),
                         ty: RustType::Primitive("i32".to_string()),
                         has_explicit_rename: false,
-                        use_optional: false, is_flatten: false,
+                        use_optional: false,
+                        is_flatten: false,
                     },
                     StructField {
                         name: "y".to_string(),
                         ty: RustType::Primitive("i32".to_string()),
                         has_explicit_rename: false,
-                        use_optional: false, is_flatten: false,
+                        use_optional: false,
+                        is_flatten: false,
                     },
                 ]),
                 has_explicit_rename: false,
@@ -376,10 +382,10 @@ fn test_complex_enum_discriminated_union() {
     // Click: { x: number, y: number }
     assert!(output.contains("Click: {"));
     assert!(output.contains("x: number"));
-    
+
     // KeyPress: string
     assert!(output.contains("KeyPress: string"));
-    
+
     // Close (unit variant) -> "Close"
     assert!(output.contains("\"Close\""));
 }
@@ -456,15 +462,13 @@ fn test_flatten_type_as_command_return() {
         RustStruct {
             name: "Address".to_string(),
             generics: vec![],
-            fields: vec![
-                StructField {
-                    name: "city".to_string(),
-                    ty: RustType::Primitive("String".to_string()),
-                    has_explicit_rename: false,
-                    use_optional: false,
-                    is_flatten: false,
-                },
-            ],
+            fields: vec![StructField {
+                name: "city".to_string(),
+                ty: RustType::Primitive("String".to_string()),
+                has_explicit_rename: false,
+                use_optional: false,
+                is_flatten: false,
+            }],
             source_file: PathBuf::from("test.rs"),
         },
         RustStruct {
@@ -524,15 +528,13 @@ fn test_flatten_type_as_command_argument() {
         RustStruct {
             name: "Metadata".to_string(),
             generics: vec![],
-            fields: vec![
-                StructField {
-                    name: "timestamp".to_string(),
-                    ty: RustType::Primitive("i64".to_string()),
-                    has_explicit_rename: false,
-                    use_optional: false,
-                    is_flatten: false,
-                },
-            ],
+            fields: vec![StructField {
+                name: "timestamp".to_string(),
+                ty: RustType::Primitive("i64".to_string()),
+                has_explicit_rename: false,
+                use_optional: false,
+                is_flatten: false,
+            }],
             source_file: PathBuf::from("test.rs"),
         },
         RustStruct {

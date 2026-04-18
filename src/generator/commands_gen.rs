@@ -67,7 +67,11 @@ fn collect_used_types(commands: &[TauriCommand], ctx: &GeneratorContext) -> Hash
 }
 
 /// Recursively collect custom type names from a RustType
-fn collect_types_from_rust_type(ty: &RustType, ctx: &GeneratorContext, types: &mut HashSet<String>) {
+fn collect_types_from_rust_type(
+    ty: &RustType,
+    ctx: &GeneratorContext,
+    types: &mut HashSet<String>,
+) {
     match ty {
         RustType::Custom(name) if ctx.is_custom_type(name) => {
             types.insert(ctx.format_type_name(name));
@@ -150,16 +154,16 @@ fn generate_return_type(return_type: &Option<RustType>, ctx: &GeneratorContext) 
 }
 
 /// Generate the arguments object for invoke
-/// 
+///
 /// By default, Tauri serializes command arguments to camelCase.
 /// If `rename_all = "snake_case"` is specified, arguments stay as snake_case.
 fn generate_args_object(args: &[CommandArg], rename_all: Option<&str>) -> String {
     let use_snake_case = rename_all == Some("snake_case");
-    
+
     args.iter()
         .map(|arg| {
             let param_name = to_camel_case(&arg.name);
-            
+
             if use_snake_case {
                 // With rename_all = "snake_case", Tauri expects snake_case keys
                 if arg.name == param_name {
@@ -218,7 +222,7 @@ fn calculate_relative_import(types_file: &Path, commands_file: &Path) -> String 
 
     // Build the path: ../../../path/to/types_file
     let mut result = String::new();
-    
+
     if up_count == 0 {
         result.push_str("./");
     } else {
@@ -289,7 +293,9 @@ mod tests {
         let cmd = TauriCommand {
             name: "get_all".to_string(),
             args: vec![],
-            return_type: Some(RustType::Vec(Box::new(RustType::Custom("Item".to_string())))),
+            return_type: Some(RustType::Vec(Box::new(RustType::Custom(
+                "Item".to_string(),
+            )))),
             source_file: test_path(),
             rename_all: None,
         };

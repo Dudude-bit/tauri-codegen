@@ -87,7 +87,7 @@ pub fn run_cargo_expand(manifest_path: &Path) -> Result<ExpandResult> {
     }
 
     let code = String::from_utf8_lossy(&output.stdout).to_string();
-    
+
     // Add success message
     let line_count = code.lines().count();
     warnings.push(format!(
@@ -101,13 +101,13 @@ pub fn run_cargo_expand(manifest_path: &Path) -> Result<ExpandResult> {
 /// Find Cargo.toml by walking up from source directory
 pub fn find_cargo_manifest(source_dir: &Path) -> Option<PathBuf> {
     let mut current = source_dir;
-    
+
     loop {
         let cargo_toml = current.join("Cargo.toml");
         if cargo_toml.exists() {
             return Some(cargo_toml);
         }
-        
+
         match current.parent() {
             Some(parent) => current = parent,
             None => return None,
@@ -125,10 +125,10 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let src_dir = temp.path().join("src");
         std::fs::create_dir_all(&src_dir).unwrap();
-        
+
         // Create Cargo.toml in temp root
         std::fs::write(temp.path().join("Cargo.toml"), "[package]\nname = \"test\"").unwrap();
-        
+
         let result = find_cargo_manifest(&src_dir);
         assert!(result.is_some());
         assert_eq!(result.unwrap(), temp.path().join("Cargo.toml"));
@@ -146,4 +146,3 @@ mod tests {
         let _available = is_cargo_expand_available();
     }
 }
-

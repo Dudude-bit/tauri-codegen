@@ -35,7 +35,7 @@ use syn::{parse_macro_input, DeriveInput};
 pub fn derive_ts(input: TokenStream) -> TokenStream {
     // Parse the input to validate syntax, but don't generate any code
     let _ = parse_macro_input!(input as DeriveInput);
-    
+
     // Return empty token stream - this is a no-op derive
     TokenStream::from(quote! {})
 }

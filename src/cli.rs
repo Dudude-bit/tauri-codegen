@@ -40,4 +40,3 @@ impl Cli {
         Cli::parse()
     }
 }
-

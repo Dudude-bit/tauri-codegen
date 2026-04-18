@@ -2,9 +2,9 @@
 
 use std::fs;
 use std::path::PathBuf;
-use tempfile::tempdir;
 use tauri_ts_generator::config::{Config, InputConfig, NamingConfig, OutputConfig};
 use tauri_ts_generator::pipeline::Pipeline;
+use tempfile::tempdir;
 
 /// Create a test config with temp directories
 fn create_test_config(source_dir: PathBuf, output_dir: PathBuf) -> Config {
@@ -59,7 +59,11 @@ pub fn list_users() -> Vec<User> {
     let pipeline = Pipeline::new(false);
 
     let result = pipeline.run(&config);
-    assert!(result.is_ok(), "Pipeline should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Pipeline should succeed: {:?}",
+        result.err()
+    );
 
     // Verify output files exist
     assert!(output_dir.join("types.ts").exists());
@@ -125,7 +129,11 @@ pub fn get_item(id: i32) -> Item {
     let pipeline = Pipeline::new(false);
 
     let result = pipeline.run(&config);
-    assert!(result.is_ok(), "Pipeline should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Pipeline should succeed: {:?}",
+        result.err()
+    );
 
     // Verify both types are in output
     let types_content = fs::read_to_string(output_dir.join("types.ts")).unwrap();
@@ -533,19 +541,28 @@ pub fn get_pod(name: String) -> PodInfo {
     let pipeline = Pipeline::new(false);
 
     let result = pipeline.run(&config);
-    assert!(result.is_ok(), "Pipeline should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Pipeline should succeed: {:?}",
+        result.err()
+    );
 
     // Verify PodInfo is generated
     let types_content = fs::read_to_string(output_dir.join("types.ts")).unwrap();
-    assert!(types_content.contains("export interface PodInfo"), 
-            "PodInfo should be in types.ts. Content:\n{}", types_content);
+    assert!(
+        types_content.contains("export interface PodInfo"),
+        "PodInfo should be in types.ts. Content:\n{}",
+        types_content
+    );
     assert!(types_content.contains("name: string"));
     assert!(types_content.contains("namespace: string"));
     assert!(types_content.contains("status: string"));
 
     // ContainerInfo should NOT be included (not used by any command)
-    assert!(!types_content.contains("ContainerInfo"), 
-            "ContainerInfo should not be in types.ts as it's unused");
+    assert!(
+        !types_content.contains("ContainerInfo"),
+        "ContainerInfo should not be in types.ts as it's unused"
+    );
 
     // Verify commands
     let commands_content = fs::read_to_string(output_dir.join("commands.ts")).unwrap();
@@ -598,11 +615,18 @@ pub fn get_inner() -> InnerType {
     let pipeline = Pipeline::new(false);
 
     let result = pipeline.run(&config);
-    assert!(result.is_ok(), "Pipeline should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Pipeline should succeed: {:?}",
+        result.err()
+    );
 
     let types_content = fs::read_to_string(output_dir.join("types.ts")).unwrap();
-    assert!(types_content.contains("export interface InnerType"),
-            "InnerType should be generated. Content:\n{}", types_content);
+    assert!(
+        types_content.contains("export interface InnerType"),
+        "InnerType should be generated. Content:\n{}",
+        types_content
+    );
 }
 
 #[test]
@@ -656,11 +680,18 @@ pub fn get_deep() -> DeepType {
     let pipeline = Pipeline::new(false);
 
     let result = pipeline.run(&config);
-    assert!(result.is_ok(), "Pipeline should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Pipeline should succeed: {:?}",
+        result.err()
+    );
 
     let types_content = fs::read_to_string(output_dir.join("types.ts")).unwrap();
-    assert!(types_content.contains("export interface DeepType"),
-            "DeepType should be generated. Content:\n{}", types_content);
+    assert!(
+        types_content.contains("export interface DeepType"),
+        "DeepType should be generated. Content:\n{}",
+        types_content
+    );
 }
 
 #[test]
@@ -727,18 +758,31 @@ pub fn get_item(id: i32) -> Item {
     let pipeline = Pipeline::new(false);
 
     let result = pipeline.run(&config);
-    assert!(result.is_ok(), "Pipeline should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Pipeline should succeed: {:?}",
+        result.err()
+    );
 
     let types_content = fs::read_to_string(output_dir.join("types.ts")).unwrap();
-    assert!(types_content.contains("export interface User"),
-            "User should be generated. Content:\n{}", types_content);
-    assert!(types_content.contains("export interface Item"),
-            "Item should be generated. Content:\n{}", types_content);
+    assert!(
+        types_content.contains("export interface User"),
+        "User should be generated. Content:\n{}",
+        types_content
+    );
+    assert!(
+        types_content.contains("export interface Item"),
+        "Item should be generated. Content:\n{}",
+        types_content
+    );
 
     let commands_content = fs::read_to_string(output_dir.join("commands.ts")).unwrap();
-    assert!(commands_content.contains("import type { User, Item }") || 
-            commands_content.contains("import type { Item, User }"),
-            "Both User and Item should be imported. Content:\n{}", commands_content);
+    assert!(
+        commands_content.contains("import type { User, Item }")
+            || commands_content.contains("import type { Item, User }"),
+        "Both User and Item should be imported. Content:\n{}",
+        commands_content
+    );
 }
 
 #[test]
@@ -792,23 +836,32 @@ pub fn get_resource(name: String) -> Resource {
     let pipeline = Pipeline::new(false);
 
     let result = pipeline.run(&config);
-    assert!(result.is_ok(), "Pipeline should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Pipeline should succeed: {:?}",
+        result.err()
+    );
 
     let types_content = fs::read_to_string(output_dir.join("types.ts")).unwrap();
-    assert!(types_content.contains("export interface Resource"),
-            "Resource should be generated. Content:\n{}", types_content);
-    assert!(types_content.contains("export type ResourceStatus"),
-            "ResourceStatus enum should be generated. Content:\n{}", types_content);
+    assert!(
+        types_content.contains("export interface Resource"),
+        "Resource should be generated. Content:\n{}",
+        types_content
+    );
+    assert!(
+        types_content.contains("export type ResourceStatus"),
+        "ResourceStatus enum should be generated. Content:\n{}",
+        types_content
+    );
     assert!(types_content.contains("\"Running\""));
     assert!(types_content.contains("\"Pending\""));
     assert!(types_content.contains("\"Failed\""));
 }
 
-
 #[test]
 fn test_parse_expanded_real_progenitor_output() {
-    use tauri_ts_generator::parser::parse_types_expanded;
     use std::path::PathBuf;
+    use tauri_ts_generator::parser::parse_types_expanded;
 
     // This is actual cargo expand output from progenitor
     let code = r#"
@@ -839,8 +892,16 @@ fn test_parse_expanded_real_progenitor_output() {
 
     // Should find both AuthResponse and UserProfile through nested modules
     let names: Vec<&str> = structs.iter().map(|s| s.name.as_str()).collect();
-    assert!(names.contains(&"AuthResponse"), "Should find AuthResponse, got {:?}", names);
-    assert!(names.contains(&"UserProfile"), "Should find UserProfile, got {:?}", names);
+    assert!(
+        names.contains(&"AuthResponse"),
+        "Should find AuthResponse, got {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"UserProfile"),
+        "Should find UserProfile, got {:?}",
+        names
+    );
 }
 
 /// Test that cross-file type usage doesn't cause false ambiguous warnings.
@@ -931,35 +992,61 @@ pub fn list_deployments(namespace: String) -> Vec<DeploymentInfo> {
 
     // The pipeline should succeed without any ambiguity issues
     let result = pipeline.run(&config);
-    assert!(result.is_ok(), "Pipeline should succeed: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Pipeline should succeed: {:?}",
+        result.err()
+    );
 
     // Verify all types are generated correctly
     let types_content = fs::read_to_string(output_dir.join("types.ts")).unwrap();
 
     // Main types should be present
-    assert!(types_content.contains("export interface StatefulSetDetailInfo"),
-            "StatefulSetDetailInfo should be generated. Content:\n{}", types_content);
-    assert!(types_content.contains("export interface DeploymentInfo"),
-            "DeploymentInfo should be generated. Content:\n{}", types_content);
+    assert!(
+        types_content.contains("export interface StatefulSetDetailInfo"),
+        "StatefulSetDetailInfo should be generated. Content:\n{}",
+        types_content
+    );
+    assert!(
+        types_content.contains("export interface DeploymentInfo"),
+        "DeploymentInfo should be generated. Content:\n{}",
+        types_content
+    );
 
     // Nested types should also be present (they're used as fields)
-    assert!(types_content.contains("export interface DeploymentContainerInfo"),
-            "DeploymentContainerInfo should be generated. Content:\n{}", types_content);
-    assert!(types_content.contains("export interface PodCondition"),
-            "PodCondition should be generated. Content:\n{}", types_content);
+    assert!(
+        types_content.contains("export interface DeploymentContainerInfo"),
+        "DeploymentContainerInfo should be generated. Content:\n{}",
+        types_content
+    );
+    assert!(
+        types_content.contains("export interface PodCondition"),
+        "PodCondition should be generated. Content:\n{}",
+        types_content
+    );
 
     // Verify field references are correct
-    assert!(types_content.contains("containers: DeploymentContainerInfo[]"),
-            "containers field should reference DeploymentContainerInfo. Content:\n{}", types_content);
-    assert!(types_content.contains("conditions: PodCondition[]"),
-            "conditions field should reference PodCondition. Content:\n{}", types_content);
+    assert!(
+        types_content.contains("containers: DeploymentContainerInfo[]"),
+        "containers field should reference DeploymentContainerInfo. Content:\n{}",
+        types_content
+    );
+    assert!(
+        types_content.contains("conditions: PodCondition[]"),
+        "conditions field should reference PodCondition. Content:\n{}",
+        types_content
+    );
 
     // Verify commands are generated
     let commands_content = fs::read_to_string(output_dir.join("commands.ts")).unwrap();
-    assert!(commands_content.contains("export async function getStatefulset"),
-            "getStatefulset command should be generated");
-    assert!(commands_content.contains("export async function listDeployments"),
-            "listDeployments command should be generated");
+    assert!(
+        commands_content.contains("export async function getStatefulset"),
+        "getStatefulset command should be generated"
+    );
+    assert!(
+        commands_content.contains("export async function listDeployments"),
+        "listDeployments command should be generated"
+    );
 }
 
 /// Test that types genuinely defined in multiple files still trigger proper handling.
@@ -1017,14 +1104,24 @@ pub fn get_user_v1(id: i32) -> User {
 
     // Pipeline should succeed - the explicit import should resolve correctly
     let result = pipeline.run(&config);
-    assert!(result.is_ok(), "Pipeline should succeed with explicit imports: {:?}", result.err());
+    assert!(
+        result.is_ok(),
+        "Pipeline should succeed with explicit imports: {:?}",
+        result.err()
+    );
 
     // Verify v1 User is generated (has id: number)
     let types_content = fs::read_to_string(output_dir.join("types.ts")).unwrap();
-    assert!(types_content.contains("export interface User"),
-            "User should be generated. Content:\n{}", types_content);
-    assert!(types_content.contains("id: number"),
-            "User should have id: number (v1 version). Content:\n{}", types_content);
+    assert!(
+        types_content.contains("export interface User"),
+        "User should be generated. Content:\n{}",
+        types_content
+    );
+    assert!(
+        types_content.contains("id: number"),
+        "User should have id: number (v1 version). Content:\n{}",
+        types_content
+    );
 }
 
 /// Test that simulates the cargo-expand scenario that caused the original bug.
@@ -1037,9 +1134,9 @@ pub fn get_user_v1(id: i32) -> User {
 /// 4. No false ambiguity warnings occur
 #[test]
 fn test_cargo_expand_does_not_cause_ambiguity() {
+    use std::path::PathBuf;
     use tauri_ts_generator::parser::parse_types_expanded;
     use tauri_ts_generator::resolver::ModuleResolver;
-    use std::path::PathBuf;
 
     // Simulate cargo-expand output containing DeploymentContainerInfo
     // This is what cargo expand would produce for a struct with #[derive(Serialize)]
@@ -1086,10 +1183,14 @@ fn test_cargo_expand_does_not_cause_ambiguity() {
 
     // Verify we found the types in cargo-expand output
     let expanded_names: Vec<&str> = expanded_structs.iter().map(|s| s.name.as_str()).collect();
-    assert!(expanded_names.contains(&"DeploymentContainerInfo"),
-            "Should find DeploymentContainerInfo in expanded output");
-    assert!(expanded_names.contains(&"StatefulSetDetailInfo"),
-            "Should find StatefulSetDetailInfo in expanded output");
+    assert!(
+        expanded_names.contains(&"DeploymentContainerInfo"),
+        "Should find DeploymentContainerInfo in expanded output"
+    );
+    assert!(
+        expanded_names.contains(&"StatefulSetDetailInfo"),
+        "Should find StatefulSetDetailInfo in expanded output"
+    );
 
     // Now create a resolver and parse the "actual" source files
     let mut resolver = ModuleResolver::new();
@@ -1106,7 +1207,9 @@ fn test_cargo_expand_does_not_cause_ambiguity() {
         }
     "#;
     let types_path = PathBuf::from("src/resources/types.rs");
-    resolver.parse_file(&types_path, types_source, &base_path).unwrap();
+    resolver
+        .parse_file(&types_path, types_source, &base_path)
+        .unwrap();
 
     // Simulate parsing src/resources/workloads.rs
     let workloads_source = r#"
@@ -1120,7 +1223,9 @@ fn test_cargo_expand_does_not_cause_ambiguity() {
         }
     "#;
     let workloads_path = PathBuf::from("src/resources/workloads.rs");
-    resolver.parse_file(&workloads_path, workloads_source, &base_path).unwrap();
+    resolver
+        .parse_file(&workloads_path, workloads_source, &base_path)
+        .unwrap();
 
     // KEY ASSERTION: DeploymentContainerInfo should only be registered once
     // (from types.rs), NOT twice (types.rs + <cargo-expand>)
@@ -1130,7 +1235,10 @@ fn test_cargo_expand_does_not_cause_ambiguity() {
     //
     // AFTER THE FIX: register_expanded_type() was removed, so only source files
     // register types.
-    let locations = resolver.type_definitions.get("DeploymentContainerInfo").unwrap();
+    let locations = resolver
+        .type_definitions
+        .get("DeploymentContainerInfo")
+        .unwrap();
     assert_eq!(
         locations.len(), 1,
         "DeploymentContainerInfo should be registered only once (from source file), not from cargo-expand. Found: {:?}",

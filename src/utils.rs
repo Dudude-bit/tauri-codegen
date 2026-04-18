@@ -130,4 +130,3 @@ mod tests {
         assert_eq!(to_pascal_case("get__user"), "GetUser");
     }
 }
-
