@@ -676,34 +676,15 @@ impl Pipeline {
     }
 }
 
-/// Collect custom type names from a RustType (returns a Vec)
+/// Collect custom type names from a RustType (returns a sorted, deduped Vec).
 fn collect_custom_types_from_rust_type(ty: &RustType) -> Vec<String> {
-    let mut types = HashSet::new();
-    collect_custom_types_recursive(ty, &mut types);
+    let mut types: HashSet<String> = HashSet::new();
+    crate::models::walk_custom_type_names(ty, &mut |name| {
+        types.insert(name.to_string());
+    });
     let mut result: Vec<String> = types.into_iter().collect();
     result.sort();
     result
-}
-
-fn collect_custom_types_recursive(ty: &RustType, types: &mut HashSet<String>) {
-    match ty {
-        RustType::Custom(name) => {
-            types.insert(name.clone());
-        }
-        RustType::Vec(inner) => collect_custom_types_recursive(inner, types),
-        RustType::Option(inner) => collect_custom_types_recursive(inner, types),
-        RustType::Result(ok) => collect_custom_types_recursive(ok, types),
-        RustType::HashMap { key, value } => {
-            collect_custom_types_recursive(key, types);
-            collect_custom_types_recursive(value, types);
-        }
-        RustType::Tuple(tuple_types) => {
-            for t in tuple_types {
-                collect_custom_types_recursive(t, types);
-            }
-        }
-        _ => {}
-    }
 }
 
 #[cfg(test)]

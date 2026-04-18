@@ -66,32 +66,19 @@ fn collect_used_types(commands: &[TauriCommand], ctx: &GeneratorContext) -> Hash
     types
 }
 
-/// Recursively collect custom type names from a RustType
+/// Collect custom type names from a RustType, filtered by the generator
+/// context (only known-registered types count) and formatted with any
+/// configured prefix/suffix.
 fn collect_types_from_rust_type(
     ty: &RustType,
     ctx: &GeneratorContext,
     types: &mut HashSet<String>,
 ) {
-    match ty {
-        RustType::Custom(name) if ctx.is_custom_type(name) => {
+    crate::models::walk_custom_type_names(ty, &mut |name| {
+        if ctx.is_custom_type(name) {
             types.insert(ctx.format_type_name(name));
         }
-        RustType::Vec(inner) => collect_types_from_rust_type(inner, ctx, types),
-        RustType::Option(inner) => collect_types_from_rust_type(inner, ctx, types),
-        RustType::Result(ok) => {
-            collect_types_from_rust_type(ok, ctx, types);
-        }
-        RustType::HashMap { key, value } => {
-            collect_types_from_rust_type(key, ctx, types);
-            collect_types_from_rust_type(value, ctx, types);
-        }
-        RustType::Tuple(types_vec) => {
-            for t in types_vec {
-                collect_types_from_rust_type(t, ctx, types);
-            }
-        }
-        _ => {}
-    }
+    });
 }
 
 /// Generate a TypeScript function for a Tauri command
