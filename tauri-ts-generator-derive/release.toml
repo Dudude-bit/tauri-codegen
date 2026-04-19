@@ -1,0 +1,9 @@
+# Derive-crate overrides. See ../release.toml for workspace defaults.
+#
+# Only the main crate's version drives a CI publish (the `vX.Y.Z` tag
+# fires the workflow). Derive is cadence-independent and shouldn't get
+# its own tag — if its version changes, the main crate's next release
+# will carry it along because publish-derive in release.yml checks
+# crates.io before uploading.
+
+tag = false

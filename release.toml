@@ -1,0 +1,40 @@
+# cargo-release configuration.
+#
+# See docs/RELEASING.md for the full workflow. Short version:
+#
+#   cargo install cargo-release        # once per machine
+#   cargo release -p tauri-ts-generator <version> --execute   # main bump
+#   git push --follow-tags
+#
+# CI picks up the pushed `vX.Y.Z` tag and handles the actual crates.io
+# upload (see .github/workflows/release.yml). These settings keep
+# cargo-release doing only the local-side bookkeeping — edit the version
+# fields, update Cargo.lock, commit, and tag the main crate.
+
+# Never publish from a developer's machine — the CI workflow has the
+# registry token. A local `cargo publish` is one revoked token away from
+# a production leak; cargo-release wouldn't help us there.
+publish = false
+
+# Push is the last step a human should run by hand, after a final glance
+# at the diff and the tag. cargo-release would happily push without
+# asking otherwise.
+push = false
+
+# Match the `on: push: tags: 'v*'` trigger in release.yml.
+tag-name = "v{{version}}"
+
+# Plain annotated tags — no GPG, no need for developers to have a key
+# wired in just to cut releases.
+sign-tag = false
+sign-commit = false
+
+# Each crate in the workspace owns its own version stream (main is on
+# 1.x, derive is still on 0.x). Prevent cargo-release from trying to
+# line them up.
+shared-version = false
+
+# Bumping derive cascades: `tauri-ts-generator`'s dependency line that
+# names derive gets upgraded to the new version, same commit. Default
+# is already "upgrade" — declared explicitly so it's obvious.
+dependent-version = "upgrade"
