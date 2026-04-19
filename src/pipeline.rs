@@ -61,6 +61,12 @@ impl Pipeline {
         // Step 2.5: Filter out Tauri special types (State, Window, etc.) including aliases
         self.filter_tauri_special_args(&mut parse_result.commands, &resolver);
 
+        // Step 2.6: Detect two `#[tauri::command]` functions with the same
+        // name. JavaScript callers do `invoke("name", …)` — if two commands
+        // share a name the generated TS would define the function twice and
+        // the Rust backend only ever routes to one of them. Fail loudly.
+        self.check_duplicate_command_names(&parse_result.commands)?;
+
         // Step 3: Collect and resolve types used in commands
         let type_collection = collect::collect_reachable_types(
             &parse_result.commands,
@@ -342,6 +348,47 @@ impl Pipeline {
         ));
 
         Ok(())
+    }
+
+    /// Step 2.6: detect duplicate `#[tauri::command]` names across the
+    /// project. Reports every colliding source file pair-wise so the user
+    /// can find them without re-scanning the tree by hand.
+    fn check_duplicate_command_names(
+        &self,
+        commands: &[crate::models::TauriCommand],
+    ) -> Result<()> {
+        use std::collections::HashMap;
+
+        let mut by_name: HashMap<&str, Vec<&std::path::Path>> = HashMap::new();
+        for cmd in commands {
+            by_name
+                .entry(cmd.name.as_str())
+                .or_default()
+                .push(cmd.source_file.as_path());
+        }
+
+        let duplicates: Vec<_> = by_name
+            .iter()
+            .filter(|(_, files)| files.len() > 1)
+            .collect();
+
+        if duplicates.is_empty() {
+            return Ok(());
+        }
+
+        self.diag
+            .error("Duplicate #[tauri::command] names detected:");
+        for (name, files) in &duplicates {
+            self.diag
+                .error(format!("  '{}' is defined in {} files:", name, files.len()));
+            for file in *files {
+                self.diag.error(format!("    - {}", file.display()));
+            }
+        }
+        anyhow::bail!(
+            "Found {} duplicate command name(s). Rename the Rust functions or use `#[tauri::command(rename = \"...\")]` to give them distinct invoke names.",
+            duplicates.len()
+        );
     }
 
     /// Step 2.5: Filter out Tauri special types from command arguments

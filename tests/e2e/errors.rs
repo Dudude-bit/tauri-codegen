@@ -54,6 +54,31 @@ fn duplicate_type_from_two_files_errors() {
 }
 
 #[test]
+fn duplicate_command_name_errors() {
+    // Two #[tauri::command] functions with the same name across different
+    // files would silently collide in the generated TS; the pipeline must
+    // refuse and report every involved file.
+    let project = Project::with_source(
+        r#"
+        #[tauri::command]
+        fn greet() -> Result<(), String> { todo!() }
+        "#,
+    );
+    project.add_source(
+        "other.rs",
+        r#"
+        #[tauri::command]
+        fn greet() -> Result<(), String> { todo!() }
+        "#,
+    );
+
+    let output = run_generate_err(&project);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_contains(&stderr, "Duplicate #[tauri::command]");
+    assert_contains(&stderr, "greet");
+}
+
+#[test]
 fn unresolved_type_warns_but_does_not_fail() {
     // `Mystery` is referenced by a command but never defined anywhere.
     // This is the shape "macro-generated types" take; the pipeline should
