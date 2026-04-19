@@ -19,3 +19,4 @@ mod recursive;
 mod rename_all;
 mod serde_features;
 mod smart_pointers;
+mod snapshots;

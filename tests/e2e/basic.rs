@@ -146,6 +146,44 @@ fn types_only_reachable_from_commands_are_emitted() {
 }
 
 #[test]
+fn unsupported_type_produces_warning_with_readable_label() {
+    // A trait object in a command arg isn't representable in TypeScript;
+    // the generator must warn loudly (not dump `Debug`-ed syn AST) and
+    // fall back to `unknown`.
+    let project = Project::with_source(
+        r#"
+        use serde::{Deserialize, Serialize};
+
+        pub trait Handler: Send + Sync {}
+
+        #[derive(Serialize, Deserialize)]
+        pub struct Req { pub id: i32 }
+
+        #[tauri::command]
+        fn do_it(_h: Box<dyn Handler>, r: Req) -> Result<(), String> { todo!() }
+        "#,
+    );
+
+    let output = run_generate_ok(&project);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let types_ok = std::fs::read_to_string(&project.types_out).unwrap();
+    assert!(
+        types_ok.contains("Req"),
+        "Req must still be emitted:\n{types_ok}"
+    );
+
+    // Warning text should include our readable label, not a Debug blob.
+    assert!(
+        stderr.contains("dyn Trait"),
+        "warning should mention the category 'dyn Trait', got:\n{stderr}"
+    );
+    assert!(
+        !stderr.contains("TypeTraitObject "),
+        "warning should not dump raw syn Debug output:\n{stderr}"
+    );
+}
+
+#[test]
 fn vec_option_hashmap_map_to_expected_ts() {
     let project = Project::with_source(
         r#"

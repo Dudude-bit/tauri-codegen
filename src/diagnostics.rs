@@ -1,7 +1,22 @@
-//! Diagnostics sink: the pipeline routes all user-facing messages through
-//! this type instead of calling `println!`/`eprintln!` directly. Centralising
-//! the output makes it trivial to respect `--verbose` consistently and keeps
-//! the door open for structured output (JSON, logger) later.
+//! Diagnostics sink.
+//!
+//! Two classes of user-facing message coexist in this crate:
+//!
+//! 1. **Pipeline status** — "Generated: X", "Parsed N commands",
+//!    cargo-expand progress, per-file debug detail. Driven by `--verbose`
+//!    and routed exclusively through this `Diagnostics` type.
+//!
+//! 2. **Always-on warnings from parsers and generators** — "Unknown
+//!    rename_all convention", "#[ts(optional)] on non-Option field",
+//!    "Unknown primitive type". These indicate real problems the user
+//!    must see regardless of verbosity, so they stay as direct
+//!    `eprintln!` with a uniform `"Warning: "` prefix. Threading
+//!    `Diagnostics` through the pure parsing/generation helpers would
+//!    add signatures-as-plumbing for no observable benefit.
+//!
+//! Keeping the door open for structured output (JSON, tracing) later is
+//! still easy: those would replace *both* sinks at once, so the current
+//! split doesn't lock us in.
 
 use std::fmt::Display;
 

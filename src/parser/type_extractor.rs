@@ -148,7 +148,24 @@ pub fn parse_type_with_context(ty: &Type, generic_params: &HashSet<String>) -> R
             )))
         }
 
+        // Unsupported shapes get a dedicated category so the caller can
+        // surface a specific diagnostic instead of "Unknown(<opaque Debug>)".
+        Type::TraitObject(_) => RustType::Unknown("dyn Trait".to_string()),
+        Type::ImplTrait(_) => RustType::Unknown("impl Trait".to_string()),
+        Type::BareFn(_) => RustType::Unknown("fn pointer".to_string()),
+        Type::Ptr(_) => RustType::Unknown("raw pointer".to_string()),
+        Type::Array(_) => RustType::Unknown("fixed-size array".to_string()),
+
         _ => RustType::Unknown(format!("{:?}", ty)),
+    }
+}
+
+/// Short, human-readable category of an `Unknown` type, suitable for warning
+/// messages. Returns `None` if the value isn't an `Unknown`.
+pub fn unknown_kind(ty: &RustType) -> Option<&str> {
+    match ty {
+        RustType::Unknown(label) => Some(label.as_str()),
+        _ => None,
     }
 }
 

@@ -5,6 +5,7 @@ members = [".", "tauri-ts-generator-derive"]
 name = "tauri-ts-generator"
 version = "1.8.1"
 edition = "2021"
+rust-version = "1.75"
 description = "CLI tool to generate TypeScript bindings from Tauri commands"
 authors = ["kirillinakin <kirillinyakin@yandex.ru>"]
 repository = "https://github.com/Dudude-bit/tauri-codegen"
@@ -59,3 +60,4 @@ anyhow = "1.0"
 
 [dev-dependencies]
 tempfile = "3.24.0"
+insta = "1"

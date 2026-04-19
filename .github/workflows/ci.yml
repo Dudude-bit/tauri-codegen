@@ -32,6 +32,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
+  msrv:
+    name: msrv (1.75)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.75
+      - uses: Swatinem/rust-cache@v2
+      # Only check the package + library, no tests/dev-deps. Dev tooling
+      # (insta, etc.) is allowed to require newer Rust.
+      - run: cargo check --workspace --locked
+
   test:
     name: test (${{ matrix.os }})
     strategy:
@@ -46,3 +57,86 @@ jobs:
       - run: cargo build --workspace --all-targets
       - run: cargo test --workspace --all-targets
       - run: cargo test --workspace --doc
+
+  # Verify that the TypeScript we generate is actually valid TypeScript.
+  # Runs our CLI against the e2e fixture, then pipes the output through tsc.
+  tsc-validate:
+    name: tsc validates generated output
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install @tauri-apps/api and typescript
+        run: |
+          mkdir -p tsc-harness
+          cd tsc-harness
+          cat > package.json <<'EOF'
+          {
+            "name": "tsc-harness",
+            "private": true,
+            "dependencies": {
+              "@tauri-apps/api": "^2",
+              "typescript": "^5"
+            }
+          }
+          EOF
+          cat > tsconfig.json <<'EOF'
+          {
+            "compilerOptions": {
+              "target": "ES2020",
+              "module": "ESNext",
+              "moduleResolution": "Bundler",
+              "strict": true,
+              "noEmit": true,
+              "esModuleInterop": true,
+              "skipLibCheck": true
+            },
+            "include": ["generated/*.ts"]
+          }
+          EOF
+          npm install --silent
+      - name: Build and run the generator
+        run: |
+          cargo build --release
+          mkdir -p fixture/src-tauri/src
+          cat > fixture/src-tauri/src/lib.rs <<'EOF'
+          use serde::{Deserialize, Serialize};
+          use std::collections::HashMap;
+
+          #[derive(Serialize, Deserialize)]
+          pub struct User { pub id: i32, pub name: String }
+
+          #[derive(Serialize, Deserialize)]
+          #[serde(rename_all = "camelCase")]
+          pub struct Event { pub user_id: i32, pub occurred_at: String }
+
+          #[derive(Serialize, Deserialize)]
+          #[serde(tag = "kind", content = "data")]
+          pub enum Msg { Hello(User), Tick, }
+
+          #[tauri::command]
+          fn get_user(id: i32) -> Result<User, String> { todo!() }
+
+          #[tauri::command]
+          fn get_events() -> Result<Vec<Event>, String> { todo!() }
+
+          #[tauri::command]
+          fn dispatch(m: Msg, bag: HashMap<String, i32>) -> Result<(), String> { todo!() }
+          EOF
+          cat > fixture/tauri-codegen.toml <<'EOF'
+          [input]
+          source_dir = "src-tauri/src"
+          [output]
+          types_file = "../tsc-harness/generated/types.ts"
+          commands_file = "../tsc-harness/generated/commands.ts"
+          EOF
+          mkdir -p tsc-harness/generated
+          (cd fixture && ../target/release/tauri-ts-generator generate)
+      - name: tsc --noEmit
+        run: |
+          cd tsc-harness
+          npx --no-install tsc --noEmit --project tsconfig.json
