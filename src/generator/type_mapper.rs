@@ -3,10 +3,6 @@ use crate::models::RustType;
 
 use super::GeneratorContext;
 
-// Re-export to_camel_case for tests
-#[cfg(test)]
-use crate::utils::to_camel_case;
-
 /// Convert a Rust type to its TypeScript equivalent
 pub fn rust_to_typescript(rust_type: &RustType, ctx: &GeneratorContext) -> String {
     match rust_type {
@@ -166,14 +162,8 @@ mod tests {
         assert_eq!(primitive_to_typescript("f64"), "number");
     }
 
-    #[test]
-    fn test_to_camel_case() {
-        assert_eq!(to_camel_case("get_user"), "getUser");
-        assert_eq!(to_camel_case("get_user_by_id"), "getUserById");
-        assert_eq!(to_camel_case("hello"), "hello");
-        // All-caps input is a single word → fully lowercase.
-        assert_eq!(to_camel_case("HELLO"), "hello");
-    }
+    // (No `test_to_camel_case` here — the canonical tests live in
+    // `utils::tests`; duplicating them would drift over time.)
 
     #[test]
     fn test_vec_to_typescript() {

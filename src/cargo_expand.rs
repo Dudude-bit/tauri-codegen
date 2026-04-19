@@ -16,7 +16,7 @@ pub struct ExpandResult {
 }
 
 /// Check if cargo-expand is installed
-pub fn is_cargo_expand_available() -> bool {
+pub(crate) fn is_cargo_expand_available() -> bool {
     Command::new("cargo")
         .args(["expand", "--version"])
         .output()
@@ -25,7 +25,7 @@ pub fn is_cargo_expand_available() -> bool {
 }
 
 /// Run cargo expand on a crate and return the expanded code
-pub fn run_cargo_expand(manifest_path: &Path) -> Result<ExpandResult> {
+pub(crate) fn run_cargo_expand(manifest_path: &Path) -> Result<ExpandResult> {
     let mut warnings = Vec::new();
 
     // Check if cargo-expand is available
@@ -99,7 +99,7 @@ pub fn run_cargo_expand(manifest_path: &Path) -> Result<ExpandResult> {
 }
 
 /// Find Cargo.toml by walking up from source directory
-pub fn find_cargo_manifest(source_dir: &Path) -> Option<PathBuf> {
+pub(crate) fn find_cargo_manifest(source_dir: &Path) -> Option<PathBuf> {
     let mut current = source_dir;
 
     loop {

@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 /// Main configuration structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     pub input: InputConfig,
     pub output: OutputConfig,
@@ -14,6 +15,7 @@ pub struct Config {
 
 /// Input configuration - where to find Rust source files
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct InputConfig {
     /// Directory to scan for Rust files
     pub source_dir: PathBuf,
@@ -30,6 +32,7 @@ pub struct InputConfig {
 
 /// Output configuration - where to write generated TypeScript files
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OutputConfig {
     /// Path for generated TypeScript types file
     pub types_file: PathBuf,
@@ -39,6 +42,7 @@ pub struct OutputConfig {
 
 /// Naming configuration - prefixes and suffixes for generated code
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 pub struct NamingConfig {
     /// Prefix for TypeScript type names
     #[serde(default)]
@@ -256,6 +260,64 @@ commands_file = "commands.ts"
 
         let result = Config::load(&config_path);
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_load_rejects_unknown_fields() {
+        // A typo like `source_directry` used to be silently accepted
+        // (the actual `source_dir` would then fail with "source dir does
+        // not exist"). With `deny_unknown_fields` we fail at parse time
+        // with a message that names the bad key.
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        fs::write(
+            &config_path,
+            r#"
+[input]
+source_dir = "src"
+source_directry = "src"
+
+[output]
+types_file = "types.ts"
+commands_file = "commands.ts"
+"#,
+        )
+        .unwrap();
+
+        let err = Config::load(&config_path).unwrap_err();
+        let msg = format!("{:#}", err);
+        assert!(
+            msg.contains("source_directry") || msg.to_lowercase().contains("unknown"),
+            "error must point at the unknown field, got:\n{msg}"
+        );
+    }
+
+    #[test]
+    fn test_load_rejects_unknown_top_level_section() {
+        let dir = tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+        fs::write(
+            &config_path,
+            r#"
+[input]
+source_dir = "src"
+
+[output]
+types_file = "types.ts"
+commands_file = "commands.ts"
+
+[notation]
+oops = "typo"
+"#,
+        )
+        .unwrap();
+
+        let err = Config::load(&config_path).unwrap_err();
+        let msg = format!("{:#}", err);
+        assert!(
+            msg.contains("notation") || msg.to_lowercase().contains("unknown"),
+            "error must point at the unknown section, got:\n{msg}"
+        );
     }
 
     #[test]
