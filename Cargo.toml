@@ -16,10 +16,11 @@ categories = ["development-tools", "command-line-utilities", "web-programming"]
 exclude = [
     "test-project",
     "tests",
+    "docs",
     "mise.toml",
     ".gitignore",
     ".github",
-    ".idea"
+    ".idea",
 ]
 
 [lib]

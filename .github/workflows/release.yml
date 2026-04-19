@@ -1,0 +1,93 @@
+name: Release
+
+# Triggered by a version tag on the main crate (e.g. `v1.9.0`). The workflow:
+#   1. Re-runs the full verification suite against the tagged ref.
+#   2. Publishes `tauri-ts-generator-derive` if its Cargo.toml version is
+#      ahead of whatever's on crates.io (idempotent — safe to skip).
+#   3. Waits for the crates.io sparse index to catch up, then publishes
+#      the main `tauri-ts-generator` crate.
+#
+# Prerequisites (one-time setup, see docs/RELEASING.md):
+#   * A `CARGO_REGISTRY_TOKEN` repository secret with a crates.io API token.
+#   * The tagger must have already bumped the version fields in both
+#     Cargo.toml files (if derive changed) and in the `tauri-ts-generator-derive`
+#     dependency entry of the main Cargo.toml.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  verify:
+    name: verify tagged ref
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Confirm Cargo.toml version matches the tag
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          CRATE_VER=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          if [ "$TAG" != "$CRATE_VER" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME points at version $TAG but Cargo.toml declares $CRATE_VER"
+            exit 1
+          fi
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace --all-targets
+      - run: cargo test --workspace --doc
+
+  publish-derive:
+    name: publish tauri-ts-generator-derive
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Publish (skip if already at this version)
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -e
+          DERIVE_VERSION=$(grep -m1 '^version' tauri-ts-generator-derive/Cargo.toml | cut -d'"' -f2)
+          # `cargo search` asks crates.io for the current published version.
+          # The grep is anchored to avoid matching e.g. "tauri-ts-generator-derive-foo".
+          PUBLISHED=$(cargo search tauri-ts-generator-derive --limit 1 \
+            | awk -F'"' '/^tauri-ts-generator-derive = / {print $2}')
+          echo "Local  derive version: $DERIVE_VERSION"
+          echo "Latest on crates.io:  ${PUBLISHED:-<none>}"
+          if [ "$DERIVE_VERSION" = "$PUBLISHED" ]; then
+            echo "::notice::Derive $DERIVE_VERSION already on crates.io — skipping publish."
+            exit 0
+          fi
+          cd tauri-ts-generator-derive
+          cargo publish --token "$CARGO_REGISTRY_TOKEN"
+
+  publish-main:
+    name: publish tauri-ts-generator
+    needs: publish-derive
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Wait for crates.io index to catch up
+        # Gives the sparse index time to learn about a freshly-published
+        # derive crate. Skipped when derive wasn't actually published
+        # this run (cheap either way).
+        run: sleep 30
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: cargo publish --token "$CARGO_REGISTRY_TOKEN"
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true

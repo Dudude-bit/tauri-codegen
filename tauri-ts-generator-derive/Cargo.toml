@@ -7,6 +7,9 @@ description = "Derive macro for tauri-ts-generator to enable #[ts(...)] attribut
 authors = ["kirillinakin <kirillinyakin@yandex.ru>"]
 repository = "https://github.com/Dudude-bit/tauri-codegen"
 license = "MIT"
+readme = "README.md"
+keywords = ["tauri", "typescript", "codegen", "derive", "proc-macro"]
+categories = ["development-tools", "rust-patterns"]
 
 [lib]
 proc-macro = true
