@@ -136,30 +136,37 @@ impl<'a> CollectState<'a> {
         }
     }
 
+    /// Record `name` as resolving to `source`. If we already had a
+    /// *different* source on file, report a conflict on both and return
+    /// `false` (the caller may still want to queue further work such as
+    /// tracking a re-export alias). Otherwise insert and return `true`.
+    fn register_resolution(&mut self, name: &str, source: &Path) -> bool {
+        if let Some(existing) = self.resolved_types.get(name).cloned() {
+            if existing != source {
+                self.add_conflict_path(name, &existing);
+                self.add_conflict_path(name, source);
+                return false;
+            }
+            return false;
+        }
+        self.resolved_types
+            .insert(name.to_string(), source.to_path_buf());
+        true
+    }
+
     fn resolve_and_enqueue(&mut self, type_name: &str, from_file: &Path) {
         let name = simple_name(type_name).to_string();
 
         match self.resolver.resolve_type(type_name, from_file) {
             ResolutionResult::Found(source) => {
-                if let Some(existing) = self.resolved_types.get(&name).cloned() {
-                    if existing != source {
-                        self.add_conflict_path(&name, &existing);
-                        self.add_conflict_path(&name, &source);
-                    }
-                } else {
-                    self.resolved_types.insert(name.clone(), source.clone());
+                if self.register_resolution(&name, &source) {
                     self.to_process.push((name, source));
                 }
             }
             ResolutionResult::FoundWithAlias(source, original_name) => {
-                if let Some(existing) = self.resolved_types.get(&name).cloned() {
-                    if existing != source {
-                        self.add_conflict_path(&name, &existing);
-                        self.add_conflict_path(&name, &source);
-                    }
-                } else {
-                    self.resolved_types.insert(name.clone(), source.clone());
-                }
+                // Alias resolutions always need to chase the original
+                // definition, even when the alias name is already known.
+                self.register_resolution(&name, &source);
                 self.reexport_aliases
                     .entry(name)
                     .or_insert_with(|| (original_name.clone(), source.clone()));
