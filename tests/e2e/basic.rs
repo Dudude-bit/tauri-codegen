@@ -184,6 +184,74 @@ fn unsupported_type_produces_warning_with_readable_label() {
 }
 
 #[test]
+fn generic_struct_preserves_concrete_args_in_command_signature() {
+    // `fn list() -> Result<Page<User>, String>` must surface the `<User>`
+    // parameterisation in both the return type and the invoke call type.
+    // Previously the generator dropped the type argument and emitted
+    // `Promise<Page>`, leaving the frontend with an uninhabited generic.
+    let project = Project::with_source(
+        r#"
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Serialize, Deserialize)]
+        pub struct Page<T> { pub items: Vec<T>, pub total: u32 }
+
+        #[derive(Serialize, Deserialize)]
+        pub struct User { pub id: i32 }
+
+        #[tauri::command]
+        fn list() -> Result<Page<User>, String> { todo!() }
+        "#,
+    );
+    run_generate_ok(&project);
+    let types = std::fs::read_to_string(&project.types_out).unwrap();
+    let commands = std::fs::read_to_string(&project.commands_out).unwrap();
+
+    assert!(types.contains("export interface Page<T>"), "{types}");
+    assert!(types.contains("export interface User"), "{types}");
+    assert!(
+        commands.contains("Promise<Page<User>>"),
+        "return type must carry <User>, got:\n{commands}"
+    );
+    assert!(
+        commands.contains(r#"invoke<Page<User>>"#),
+        "invoke call type must carry <User>, got:\n{commands}"
+    );
+    // The `User` import should be present (it's used inside the generic).
+    assert!(
+        commands.contains("import type { Page, User }"),
+        "{commands}"
+    );
+}
+
+#[test]
+fn generic_struct_through_hashmap() {
+    // Nested generics: HashMap<String, Page<User>>. Each layer must keep
+    // its parameterisation.
+    let project = Project::with_source(
+        r#"
+        use serde::{Deserialize, Serialize};
+        use std::collections::HashMap;
+
+        #[derive(Serialize, Deserialize)]
+        pub struct Page<T> { pub items: Vec<T> }
+
+        #[derive(Serialize, Deserialize)]
+        pub struct User { pub id: i32 }
+
+        #[tauri::command]
+        fn lookup() -> Result<HashMap<String, Page<User>>, String> { todo!() }
+        "#,
+    );
+    run_generate_ok(&project);
+    let commands = std::fs::read_to_string(&project.commands_out).unwrap();
+    assert!(
+        commands.contains("Promise<Record<string, Page<User>>>"),
+        "nested generic must survive, got:\n{commands}"
+    );
+}
+
+#[test]
 fn vec_option_hashmap_map_to_expected_ts() {
     let project = Project::with_source(
         r#"

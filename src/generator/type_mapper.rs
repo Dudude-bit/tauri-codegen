@@ -83,6 +83,16 @@ pub fn rust_to_typescript(rust_type: &RustType, ctx: &GeneratorContext) -> Strin
             }
         }
 
+        RustType::CustomGeneric { name, args } => {
+            let base = if ctx.is_custom_type(name) {
+                ctx.format_type_name(name)
+            } else {
+                name.clone()
+            };
+            let rendered: Vec<String> = args.iter().map(|a| rust_to_typescript(a, ctx)).collect();
+            format!("{}<{}>", base, rendered.join(", "))
+        }
+
         RustType::Generic(name) => {
             // Generic type parameters are passed through as-is (T, U, etc.)
             name.clone()

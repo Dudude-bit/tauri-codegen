@@ -104,9 +104,11 @@ pub fn parse_type_with_context(ty: &Type, generic_params: &HashSet<String>) -> R
                         }
                     }
 
-                    // Custom types (not a known generic param)
+                    // Custom types (not a known generic param). If the final
+                    // path segment carries generic arguments (e.g. `Page<User>`),
+                    // propagate them into `CustomGeneric` so command signatures
+                    // can carry the concrete instantiation through to TS.
                     _ => {
-                        // Reconstruct full path for custom types
                         let full_name = type_path
                             .path
                             .segments
@@ -114,7 +116,29 @@ pub fn parse_type_with_context(ty: &Type, generic_params: &HashSet<String>) -> R
                             .map(|s| s.ident.to_string())
                             .collect::<Vec<_>>()
                             .join("::");
-                        RustType::Custom(full_name)
+
+                        let args = match &segment.arguments {
+                            PathArguments::AngleBracketed(angle) => angle
+                                .args
+                                .iter()
+                                .filter_map(|arg| match arg {
+                                    GenericArgument::Type(ty) => {
+                                        Some(parse_type_with_context(ty, generic_params))
+                                    }
+                                    _ => None,
+                                })
+                                .collect::<Vec<_>>(),
+                            _ => Vec::new(),
+                        };
+
+                        if args.is_empty() {
+                            RustType::Custom(full_name)
+                        } else {
+                            RustType::CustomGeneric {
+                                name: full_name,
+                                args,
+                            }
+                        }
                     }
                 }
             } else {

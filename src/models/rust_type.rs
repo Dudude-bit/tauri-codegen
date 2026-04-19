@@ -16,8 +16,13 @@ pub enum RustType {
     },
     /// Tuple types
     Tuple(Vec<RustType>),
-    /// Reference to a custom type (struct or enum)
+    /// Reference to a custom type (struct or enum) with no generic args.
     Custom(String),
+    /// Reference to a custom type with generic arguments bound — e.g.
+    /// `Page<User>` shows up as `CustomGeneric { name: "Page", args:
+    /// [Custom("User")] }`. Kept as a separate variant so every existing
+    /// call site that matches `Custom(String)` continues to compile.
+    CustomGeneric { name: String, args: Vec<RustType> },
     /// Generic type parameter (T, U, K, V, etc.)
     Generic(String),
     /// Unit type ()
@@ -34,6 +39,12 @@ pub enum RustType {
 pub fn walk_custom_type_names<F: FnMut(&str)>(ty: &RustType, visit: &mut F) {
     match ty {
         RustType::Custom(name) => visit(name),
+        RustType::CustomGeneric { name, args } => {
+            visit(name);
+            for arg in args {
+                walk_custom_type_names(arg, visit);
+            }
+        }
         RustType::Vec(inner) | RustType::Option(inner) | RustType::Result(inner) => {
             walk_custom_type_names(inner, visit);
         }
