@@ -1,29 +1,36 @@
 //! Diagnostics sink.
 //!
-//! Two classes of user-facing message coexist in this crate:
+//! One type, two consumption patterns:
 //!
 //! 1. **Pipeline status** — "Generated: X", "Parsed N commands",
-//!    cargo-expand progress, per-file debug detail. Driven by `--verbose`
-//!    and routed exclusively through this `Diagnostics` type.
+//!    cargo-expand progress, per-file debug detail. The `Pipeline`
+//!    holds a `Diagnostics` instance and calls `info/warn/error/debug`
+//!    on it directly. These messages respect `--verbose`.
 //!
-//! 2. **Always-on warnings from parsers and generators** — "Unknown
+//! 2. **Warnings from pure parsing/generation helpers** — "Unknown
 //!    rename_all convention", "#[ts(optional)] on non-Option field",
-//!    "Unknown primitive type". These indicate real problems the user
-//!    must see regardless of verbosity, so they stay as direct
-//!    `eprintln!` with a uniform `"Warning: "` prefix. Threading
-//!    `Diagnostics` through the pure parsing/generation helpers would
-//!    add signatures-as-plumbing for no observable benefit.
+//!    "Unknown primitive type". These are called from deep inside the
+//!    parser/generator where threading `&Diagnostics` through every
+//!    helper would double the signature noise. The pipeline installs
+//!    a thread-local at startup and helpers read it via `current()`.
+//!    Single-threaded by design — this CLI never forks work onto
+//!    rayon/tokio — so a thread-local `Cell` is both sound and cheap.
 //!
-//! Keeping the door open for structured output (JSON, tracing) later is
-//! still easy: those would replace *both* sinks at once, so the current
-//! split doesn't lock us in.
+//! Future structured output (JSON / tracing) replaces this module wholesale.
 
+use std::cell::Cell;
 use std::fmt::Display;
 
 /// Reports progress, warnings, and verbose-only detail to the terminal.
 #[derive(Debug, Clone, Copy)]
 pub struct Diagnostics {
     verbose: bool,
+}
+
+impl Default for Diagnostics {
+    fn default() -> Self {
+        Self::new(false)
+    }
 }
 
 impl Diagnostics {
@@ -58,4 +65,30 @@ impl Diagnostics {
             eprintln!("Info: {}", msg);
         }
     }
+}
+
+thread_local! {
+    /// Ambient diagnostics sink for helpers that can't easily take a
+    /// `&Diagnostics` parameter (e.g. the attribute-parsing helpers deep
+    /// inside the serde walker). Defaults to a silent-default sink before
+    /// `Pipeline::run` installs the real one.
+    static CURRENT: Cell<Diagnostics> = const { Cell::new(Diagnostics { verbose: false }) };
+}
+
+/// Install the ambient sink for the duration of the current thread. Call
+/// this once from the pipeline; helpers reached via `current()` will pick
+/// up the value.
+pub fn install(diag: Diagnostics) {
+    CURRENT.with(|c| c.set(diag));
+}
+
+/// Read the ambient sink. Returns the silent default if `install` was
+/// never called on this thread (tests, library users).
+pub fn current() -> Diagnostics {
+    CURRENT.with(|c| c.get())
+}
+
+/// Shorthand: always-visible warning via the ambient sink.
+pub fn warn(msg: impl Display) {
+    current().warn(msg);
 }

@@ -63,8 +63,8 @@ pub(super) fn has_ts_optional(attrs: &[syn::Attribute], ty: &crate::models::Rust
                                 if matches!(ty, crate::models::RustType::Option(_)) {
                                     return true;
                                 } else {
-                                    eprintln!(
-                                        "Warning: #[ts(optional)] is only valid on Option<T> fields, ignoring"
+                                    crate::diagnostics::warn(
+                                        "#[ts(optional)] is only valid on Option<T> fields, ignoring",
                                     );
                                 }
                             }
@@ -236,12 +236,12 @@ pub(super) fn apply_rename_all(name: &str, rename_all: &Option<String>) -> Optio
         "SCREAMING-KEBAB-CASE" => to_screaming_kebab_case(name),
         "PascalCase" => to_pascal_case(name),
         unknown => {
-            eprintln!(
-                "Warning: Unknown rename_all convention '{}', using original name. \
+            crate::diagnostics::warn(format!(
+                "Unknown rename_all convention '{}', using original name. \
                 Supported values: lowercase, UPPERCASE, camelCase, snake_case, \
                 SCREAMING_SNAKE_CASE, kebab-case, SCREAMING-KEBAB-CASE, PascalCase",
                 unknown
-            );
+            ));
             name.to_string()
         }
     })

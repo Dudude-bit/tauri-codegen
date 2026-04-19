@@ -240,21 +240,21 @@ fn generate_variant(
                     // Emit a warning and generate a best-effort type.
                     if types.len() == 1 {
                         // Newtype variant - could potentially work if inner type is a struct
-                        eprintln!(
-                            "Warning: Internal tagging with newtype variant '{}' may not work \
+                        crate::diagnostics::warn(format!(
+                            "Internal tagging with newtype variant '{}' may not work \
                             correctly with serde. Consider using adjacent tagging instead.",
                             variant.name
-                        );
+                        ));
                         let inner_ts = rust_to_typescript(&types[0], ctx);
                         // Generate: { tag: "Name" } & InnerType
                         format!("({{ {}: \"{}\" }} & {})", tag, variant.name, inner_ts)
                     } else {
-                        eprintln!(
-                            "Warning: Internal tagging does not support tuple variants with \
+                        crate::diagnostics::warn(format!(
+                            "Internal tagging does not support tuple variants with \
                             multiple elements (variant '{}'). Serde will error at runtime. \
                             Consider using external or adjacent tagging instead.",
                             variant.name
-                        );
+                        ));
                         // Fall back to just the tag since this won't work in serde anyway
                         format!("{{ {}: \"{}\" }}", tag, variant.name)
                     }

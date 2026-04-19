@@ -36,6 +36,11 @@ impl Pipeline {
 
     /// Run the full generation pipeline
     pub fn run(&self, config: &Config) -> Result<()> {
+        // Install the ambient Diagnostics sink for any helper that can't
+        // easily take a `&Diagnostics` parameter (the serde-attr walkers,
+        // the type-mapper's Unknown fallbacks, etc.).
+        crate::diagnostics::install(self.diag);
+
         self.diag.debug(format!(
             "Scanning directory: {}",
             config.input.source_dir.display()

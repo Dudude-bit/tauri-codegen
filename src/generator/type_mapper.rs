@@ -90,7 +90,7 @@ pub fn rust_to_typescript(rust_type: &RustType, ctx: &GeneratorContext) -> Strin
         RustType::Unit => "void".to_string(),
 
         RustType::Unknown(desc) => {
-            eprintln!("Warning: Unknown type '{}', using 'unknown'", desc);
+            crate::diagnostics::warn(format!("Unknown type '{}', using 'unknown'", desc));
             "unknown".to_string()
         }
     }
@@ -116,10 +116,10 @@ fn primitive_to_typescript(name: &str) -> String {
         return ts_type.to_string();
     }
 
-    eprintln!(
-        "Warning: Unknown primitive type '{}', using 'unknown'",
+    crate::diagnostics::warn(format!(
+        "Unknown primitive type '{}', using 'unknown'",
         name
-    );
+    ));
     "unknown".to_string()
 }
 
