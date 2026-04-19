@@ -1,97 +1,10 @@
 //! Unit tests extracted from the parent module.
 
 use super::*;
-use crate::models::{walk_custom_type_names, CommandArg, TauriCommand};
-use std::collections::HashSet;
+use crate::models::{CommandArg, TauriCommand};
 
 fn test_path() -> PathBuf {
     PathBuf::from("test.rs")
-}
-
-/// Test-local wrapper that exercises the shared model walker.
-fn collect_custom_types_from_rust_type(ty: &RustType) -> Vec<String> {
-    let mut set: HashSet<String> = HashSet::new();
-    walk_custom_type_names(ty, &mut |n| {
-        set.insert(n.to_string());
-    });
-    let mut out: Vec<String> = set.into_iter().collect();
-    out.sort();
-    out
-}
-
-#[test]
-fn test_collect_custom_types_simple() {
-    let ty = RustType::Custom("User".to_string());
-    let types = collect_custom_types_from_rust_type(&ty);
-    assert_eq!(types, vec!["User"]);
-}
-
-#[test]
-fn test_collect_custom_types_primitive() {
-    let ty = RustType::Primitive("String".to_string());
-    let types = collect_custom_types_from_rust_type(&ty);
-    assert!(types.is_empty());
-}
-
-#[test]
-fn test_collect_custom_types_vec() {
-    let ty = RustType::Vec(Box::new(RustType::Custom("Item".to_string())));
-    let types = collect_custom_types_from_rust_type(&ty);
-    assert_eq!(types, vec!["Item"]);
-}
-
-#[test]
-fn test_collect_custom_types_option() {
-    let ty = RustType::Option(Box::new(RustType::Custom("User".to_string())));
-    let types = collect_custom_types_from_rust_type(&ty);
-    assert_eq!(types, vec!["User"]);
-}
-
-#[test]
-fn test_collect_custom_types_result() {
-    let ty = RustType::Result(Box::new(RustType::Custom("Response".to_string())));
-    let types = collect_custom_types_from_rust_type(&ty);
-    assert_eq!(types, vec!["Response"]);
-}
-
-#[test]
-fn test_collect_custom_types_hashmap() {
-    let ty = RustType::HashMap {
-        key: Box::new(RustType::Primitive("String".to_string())),
-        value: Box::new(RustType::Custom("User".to_string())),
-    };
-    let types = collect_custom_types_from_rust_type(&ty);
-    assert_eq!(types, vec!["User"]);
-}
-
-#[test]
-fn test_collect_custom_types_tuple() {
-    let ty = RustType::Tuple(vec![
-        RustType::Custom("User".to_string()),
-        RustType::Custom("Item".to_string()),
-        RustType::Primitive("i32".to_string()),
-    ]);
-    let types = collect_custom_types_from_rust_type(&ty);
-    assert_eq!(types, vec!["Item", "User"]);
-}
-
-#[test]
-fn test_collect_custom_types_nested() {
-    let ty = RustType::Vec(Box::new(RustType::Option(Box::new(RustType::Custom(
-        "User".to_string(),
-    )))));
-    let types = collect_custom_types_from_rust_type(&ty);
-    assert_eq!(types, vec!["User"]);
-}
-
-#[test]
-fn test_collect_custom_types_no_duplicates() {
-    let ty = RustType::Tuple(vec![
-        RustType::Custom("User".to_string()),
-        RustType::Custom("User".to_string()),
-    ]);
-    let types = collect_custom_types_from_rust_type(&ty);
-    assert_eq!(types, vec!["User"]);
 }
 
 fn write_file(path: &std::path::Path, content: &str) {
@@ -103,7 +16,7 @@ fn write_file(path: &std::path::Path, content: &str) {
 
 #[test]
 fn test_collect_reachable_types_from_commands() {
-    let pipeline = Pipeline::new(false);
+    // direct free-fn invocation keeps tests tied to the public collect API
     let temp_dir = tempfile::tempdir().unwrap();
     let src_dir = temp_dir.path().join("src");
 
@@ -130,7 +43,12 @@ fn test_collect_reachable_types_from_commands() {
         rename_all: None,
     }];
 
-    let result = pipeline.collect_reachable_types(&commands, &resolver, None);
+    let result = collect::collect_reachable_types(
+        &commands,
+        &resolver,
+        None,
+        &crate::diagnostics::Diagnostics::new(false),
+    );
 
     assert!(result.conflicts.is_empty());
     assert!(result.structs.iter().any(|s| s.name == "Request"));
@@ -139,7 +57,6 @@ fn test_collect_reachable_types_from_commands() {
 
 #[test]
 fn test_collect_reachable_types_includes_aliases() {
-    let pipeline = Pipeline::new(false);
     let temp_dir = tempfile::tempdir().unwrap();
     let src_dir = temp_dir.path().join("src");
 
@@ -166,7 +83,12 @@ fn test_collect_reachable_types_includes_aliases() {
         rename_all: None,
     }];
 
-    let result = pipeline.collect_reachable_types(&commands, &resolver, None);
+    let result = collect::collect_reachable_types(
+        &commands,
+        &resolver,
+        None,
+        &crate::diagnostics::Diagnostics::new(false),
+    );
 
     assert!(result.aliases.iter().any(|a| a.name == "UserAlias"));
     assert!(result.structs.iter().any(|s| s.name == "User"));
@@ -174,7 +96,6 @@ fn test_collect_reachable_types_includes_aliases() {
 
 #[test]
 fn test_collect_reachable_types_detects_conflicts() {
-    let pipeline = Pipeline::new(false);
     let temp_dir = tempfile::tempdir().unwrap();
     let src_dir = temp_dir.path().join("src");
 
@@ -202,7 +123,12 @@ fn test_collect_reachable_types_detects_conflicts() {
         rename_all: None,
     }];
 
-    let result = pipeline.collect_reachable_types(&commands, &resolver, None);
+    let result = collect::collect_reachable_types(
+        &commands,
+        &resolver,
+        None,
+        &crate::diagnostics::Diagnostics::new(false),
+    );
 
     assert!(result.conflicts.contains_key("User"));
 }
@@ -316,7 +242,6 @@ fn test_filter_tauri_special_types_via_alias() {
 fn test_collect_reachable_types_handles_self_referential_struct() {
     // A self-referential tree node is the canonical stress test for the
     // reachable-type fixpoint loop: without dedup, this would recurse forever.
-    let pipeline = Pipeline::new(false);
     let temp_dir = tempfile::tempdir().unwrap();
     let src_dir = temp_dir.path().join("src");
 
@@ -342,7 +267,12 @@ fn test_collect_reachable_types_handles_self_referential_struct() {
         rename_all: None,
     }];
 
-    let result = pipeline.collect_reachable_types(&commands, &resolver, None);
+    let result = collect::collect_reachable_types(
+        &commands,
+        &resolver,
+        None,
+        &crate::diagnostics::Diagnostics::new(false),
+    );
 
     assert!(result.conflicts.is_empty());
     // Node must appear exactly once despite the self-reference.
@@ -354,7 +284,6 @@ fn test_collect_reachable_types_handles_self_referential_struct() {
 fn test_collect_reachable_types_handles_mutually_recursive_structs() {
     // A -> B -> A cycle. Without cycle protection the fixpoint loop
     // would oscillate between the two types forever.
-    let pipeline = Pipeline::new(false);
     let temp_dir = tempfile::tempdir().unwrap();
     let src_dir = temp_dir.path().join("src");
 
@@ -378,7 +307,12 @@ fn test_collect_reachable_types_handles_mutually_recursive_structs() {
         rename_all: None,
     }];
 
-    let result = pipeline.collect_reachable_types(&commands, &resolver, None);
+    let result = collect::collect_reachable_types(
+        &commands,
+        &resolver,
+        None,
+        &crate::diagnostics::Diagnostics::new(false),
+    );
 
     assert_eq!(result.structs.iter().filter(|s| s.name == "A").count(), 1);
     assert_eq!(result.structs.iter().filter(|s| s.name == "B").count(), 1);

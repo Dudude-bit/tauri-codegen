@@ -49,3 +49,83 @@ pub fn walk_custom_type_names<F: FnMut(&str)>(ty: &RustType, visit: &mut F) {
         RustType::Primitive(_) | RustType::Generic(_) | RustType::Unit | RustType::Unknown(_) => {}
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    fn collect(ty: &RustType) -> Vec<String> {
+        let mut set: HashSet<String> = HashSet::new();
+        walk_custom_type_names(ty, &mut |n| {
+            set.insert(n.to_string());
+        });
+        let mut out: Vec<String> = set.into_iter().collect();
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn simple_custom() {
+        assert_eq!(collect(&RustType::Custom("User".into())), vec!["User"]);
+    }
+
+    #[test]
+    fn primitive_yields_nothing() {
+        assert!(collect(&RustType::Primitive("String".into())).is_empty());
+    }
+
+    #[test]
+    fn walks_into_vec() {
+        let ty = RustType::Vec(Box::new(RustType::Custom("Item".into())));
+        assert_eq!(collect(&ty), vec!["Item"]);
+    }
+
+    #[test]
+    fn walks_into_option() {
+        let ty = RustType::Option(Box::new(RustType::Custom("User".into())));
+        assert_eq!(collect(&ty), vec!["User"]);
+    }
+
+    #[test]
+    fn walks_into_result() {
+        let ty = RustType::Result(Box::new(RustType::Custom("Response".into())));
+        assert_eq!(collect(&ty), vec!["Response"]);
+    }
+
+    #[test]
+    fn walks_into_hashmap_key_and_value() {
+        let ty = RustType::HashMap {
+            key: Box::new(RustType::Primitive("String".into())),
+            value: Box::new(RustType::Custom("User".into())),
+        };
+        assert_eq!(collect(&ty), vec!["User"]);
+    }
+
+    #[test]
+    fn walks_into_tuple() {
+        let ty = RustType::Tuple(vec![
+            RustType::Custom("User".into()),
+            RustType::Custom("Item".into()),
+            RustType::Primitive("i32".into()),
+        ]);
+        assert_eq!(collect(&ty), vec!["Item", "User"]);
+    }
+
+    #[test]
+    fn deduplicates_repeated_names() {
+        let ty = RustType::Tuple(vec![
+            RustType::Custom("User".into()),
+            RustType::Custom("User".into()),
+        ]);
+        assert_eq!(collect(&ty), vec!["User"]);
+    }
+
+    #[test]
+    fn nested_containers() {
+        let ty = RustType::Vec(Box::new(RustType::Option(Box::new(RustType::Custom(
+            "User".into(),
+        )))));
+        assert_eq!(collect(&ty), vec!["User"]);
+    }
+}

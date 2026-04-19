@@ -62,10 +62,11 @@ impl Pipeline {
         self.filter_tauri_special_args(&mut parse_result.commands, &resolver);
 
         // Step 3: Collect and resolve types used in commands
-        let type_collection = self.collect_reachable_types(
+        let type_collection = collect::collect_reachable_types(
             &parse_result.commands,
             &resolver,
             expanded_types.as_ref(),
+            &self.diag,
         );
 
         // Step 4: Check for conflicts
@@ -280,19 +281,6 @@ impl Pipeline {
         }
 
         Ok((parse_result, resolver, expanded_types))
-    }
-
-    /// Step 3: Collect types reachable from command signatures.
-    /// Thin wrapper over `pipeline::collect::collect_reachable_types` kept so
-    /// the existing `Pipeline::collect_reachable_types(...)` test call sites
-    /// continue to work unchanged.
-    pub(crate) fn collect_reachable_types(
-        &self,
-        commands: &[crate::models::TauriCommand],
-        resolver: &ModuleResolver,
-        expanded_types: Option<&ParsedTypes>,
-    ) -> TypeCollectionResult {
-        collect::collect_reachable_types(commands, resolver, expanded_types, &self.diag)
     }
 
     /// Step 6: Generate TypeScript output files

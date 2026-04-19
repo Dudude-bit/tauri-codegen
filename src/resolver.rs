@@ -15,14 +15,11 @@ use std::path::{Path, PathBuf};
 
 use helpers::are_siblings;
 
-/// Maps type names to their source file locations
-pub type TypeLocations = HashMap<String, Vec<PathBuf>>;
-
 /// Maps alias names to their original type names
-pub type AliasMap = HashMap<String, String>;
+type AliasMap = HashMap<String, String>;
 
 /// A module path represented as a list of path segments
-pub type ModulePath = Vec<String>;
+type ModulePath = Vec<String>;
 
 /// Result of a type resolution attempt
 #[derive(Debug, Clone, PartialEq)]

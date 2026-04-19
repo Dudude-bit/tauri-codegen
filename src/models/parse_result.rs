@@ -1,14 +1,11 @@
-use super::{RustEnum, RustStruct, TauriCommand};
+use super::TauriCommand;
 
-/// Result of parsing a Rust file
+/// Commands accumulated from scanning every source file.
+/// (Types and enums are walked separately through `pipeline::collect`, so the
+/// parse phase only needs to carry the command list.)
 #[derive(Debug, Default)]
 pub struct ParseResult {
-    /// Tauri commands found in the file
     pub commands: Vec<TauriCommand>,
-    /// Structs found in the file
-    pub structs: Vec<RustStruct>,
-    /// Enums found in the file
-    pub enums: Vec<RustEnum>,
 }
 
 impl ParseResult {
