@@ -225,6 +225,38 @@ fn generic_struct_preserves_concrete_args_in_command_signature() {
 }
 
 #[test]
+fn generic_struct_as_command_argument() {
+    // Symmetric to `generic_struct_preserves_concrete_args_in_command_signature`
+    // but with the generic in argument position instead of the return. The
+    // `<User>` must show up in the parameter type and the `invoke` payload
+    // must reference both `Page` and `User` in its import list.
+    let project = Project::with_source(
+        r#"
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Serialize, Deserialize)]
+        pub struct Page<T> { pub items: Vec<T>, pub total: u32 }
+
+        #[derive(Serialize, Deserialize)]
+        pub struct User { pub id: i32 }
+
+        #[tauri::command]
+        fn accept(p: Page<User>) -> Result<(), String> { todo!() }
+        "#,
+    );
+    run_generate_ok(&project);
+    let commands = std::fs::read_to_string(&project.commands_out).unwrap();
+    assert!(
+        commands.contains("p: Page<User>"),
+        "argument type must carry <User>:\n{commands}"
+    );
+    assert!(
+        commands.contains("import type { Page, User }"),
+        "both types must be imported even though only Page is explicit in the sig:\n{commands}"
+    );
+}
+
+#[test]
 fn generic_struct_through_hashmap() {
     // Nested generics: HashMap<String, Page<User>>. Each layer must keep
     // its parameterisation.

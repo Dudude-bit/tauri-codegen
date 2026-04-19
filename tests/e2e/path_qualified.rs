@@ -73,6 +73,43 @@ fn partial_module_path_in_command_signature() {
 }
 
 #[test]
+fn same_type_reached_via_different_paths_is_not_a_conflict() {
+    // Two commands reach the same `User` struct — one through a fully
+    // qualified `crate::a::User`, the other through a plain `a::User`.
+    // Both resolve to the same file. Pipeline should *not* raise a
+    // conflict on the second pass (exercises the `register_resolution`
+    // same-name-same-source return path).
+    let project = Project::with_source(
+        r#"
+        pub mod a {
+            use serde::{Deserialize, Serialize};
+            #[derive(Serialize, Deserialize)]
+            pub struct User { pub id: i32 }
+        }
+
+        #[tauri::command]
+        fn first() -> Result<a::User, String> { todo!() }
+
+        #[tauri::command]
+        fn second() -> Result<crate::a::User, String> { todo!() }
+        "#,
+    );
+    run_generate_ok(&project);
+    let types = std::fs::read_to_string(&project.types_out).unwrap();
+    assert_eq!(
+        types.matches("export interface User").count(),
+        1,
+        "User must be declared exactly once:\n{types}"
+    );
+
+    let commands = std::fs::read_to_string(&project.commands_out).unwrap();
+    assert!(commands.contains("Promise<User>"));
+    // And the file itself mentions both commands referencing it.
+    assert!(commands.contains("function first()"));
+    assert!(commands.contains("function second()"));
+}
+
+#[test]
 fn qualified_path_with_generic_arguments() {
     // Combines path qualification with a generic type — the stripping must
     // happen on *both* the outer and the inner name.

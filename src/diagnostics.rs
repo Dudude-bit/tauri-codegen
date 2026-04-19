@@ -92,3 +92,36 @@ pub fn current() -> Diagnostics {
 pub fn warn(msg: impl Display) {
     current().warn(msg);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn install_and_current_roundtrip() {
+        // Default before any install.
+        let before = current();
+        assert!(!before.verbose(), "default sink must be silent");
+
+        install(Diagnostics::new(true));
+        assert!(
+            current().verbose(),
+            "install must take effect on this thread"
+        );
+
+        // Overriding replaces; the previous verbose value doesn't sneak back.
+        install(Diagnostics::new(false));
+        assert!(!current().verbose(), "overrides must replace, not stack");
+    }
+
+    #[test]
+    fn thread_local_is_per_thread() {
+        // Set verbose on the main thread; a spawned thread should not see it.
+        install(Diagnostics::new(true));
+        let other = std::thread::spawn(|| current().verbose()).join().unwrap();
+        assert!(
+            !other,
+            "spawned thread must see the silent default, not inherit from parent"
+        );
+    }
+}

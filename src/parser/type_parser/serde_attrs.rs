@@ -228,3 +228,68 @@ pub(super) fn apply_rename_all(name: &str, rename_all: &Option<String>) -> Optio
         }
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Parse a snippet of Rust source and hand back its first item's attrs.
+    fn attrs_of(src: &str) -> Vec<syn::Attribute> {
+        let file: syn::File = syn::parse_str(src).expect("valid Rust source");
+        match &file.items[0] {
+            syn::Item::Enum(item) => item.attrs.clone(),
+            syn::Item::Struct(item) => item.attrs.clone(),
+            _ => panic!("first item must be struct or enum"),
+        }
+    }
+
+    #[test]
+    fn parse_container_attrs_collects_all_keys_in_one_pass() {
+        // Multi-attribute input: rename_all + tag + content on one enum.
+        // The shared `for_each_meta_in` walker must return `false` from the
+        // callback to keep collecting across multiple meta items.
+        let attrs = attrs_of(
+            r#"
+            #[derive(Serialize, Deserialize)]
+            #[serde(rename_all = "snake_case", tag = "kind", content = "data")]
+            pub enum E { A, B }
+            "#,
+        );
+        let parsed = parse_serde_container_attrs(&attrs);
+        assert_eq!(parsed.rename_all.as_deref(), Some("snake_case"));
+        assert_eq!(parsed.tag.as_deref(), Some("kind"));
+        assert_eq!(parsed.content.as_deref(), Some("data"));
+        assert!(!parsed.untagged);
+    }
+
+    #[test]
+    fn parse_container_attrs_picks_up_attrs_spread_across_multiple_attributes() {
+        // Users sometimes spread options across two attributes; the walker
+        // must aggregate across every `#[serde(...)]` it sees.
+        let attrs = attrs_of(
+            r#"
+            #[derive(Serialize)]
+            #[serde(rename_all = "camelCase")]
+            #[serde(tag = "type")]
+            pub struct S;
+            "#,
+        );
+        let parsed = parse_serde_container_attrs(&attrs);
+        assert_eq!(parsed.rename_all.as_deref(), Some("camelCase"));
+        assert_eq!(parsed.tag.as_deref(), Some("type"));
+    }
+
+    #[test]
+    fn untagged_sets_flag_even_alongside_rename_all() {
+        let attrs = attrs_of(
+            r#"
+            #[derive(Serialize)]
+            #[serde(untagged, rename_all = "lowercase")]
+            pub enum E { A, B }
+            "#,
+        );
+        let parsed = parse_serde_container_attrs(&attrs);
+        assert!(parsed.untagged);
+        assert_eq!(parsed.rename_all.as_deref(), Some("lowercase"));
+    }
+}
