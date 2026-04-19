@@ -15,7 +15,7 @@ use crate::generator::{
     commands_gen::generate_commands_file, types_gen::generate_types_file, GeneratorContext,
 };
 use crate::known_types;
-use crate::models::{ParseResult, RustEnum, RustStruct, RustType, RustTypeAlias};
+use crate::models::{RustEnum, RustStruct, RustType, RustTypeAlias, TauriCommand};
 use crate::parser::{parse_commands, parse_types, ParseOptions, ParsedTypes};
 use crate::resolver::ModuleResolver;
 use crate::scanner::Scanner;
@@ -60,21 +60,21 @@ impl Pipeline {
         };
 
         // Step 2: Parse all files and build resolver
-        let (mut parse_result, resolver, expanded_types) =
+        let (mut commands, resolver, expanded_types) =
             self.parse_files(&rust_files, config, expanded_code.as_deref())?;
 
         // Step 2.5: Filter out Tauri special types (State, Window, etc.) including aliases
-        self.filter_tauri_special_args(&mut parse_result.commands, &resolver);
+        self.filter_tauri_special_args(&mut commands, &resolver);
 
         // Step 2.6: Detect two `#[tauri::command]` functions with the same
         // name. JavaScript callers do `invoke("name", …)` — if two commands
         // share a name the generated TS would define the function twice and
         // the Rust backend only ever routes to one of them. Fail loudly.
-        self.check_duplicate_command_names(&parse_result.commands)?;
+        self.check_duplicate_command_names(&commands)?;
 
         // Step 3: Collect and resolve types used in commands
         let type_collection = collect::collect_reachable_types(
-            &parse_result.commands,
+            &commands,
             &resolver,
             expanded_types.as_ref(),
             &self.diag,
@@ -127,7 +127,7 @@ impl Pipeline {
         // Summary
         self.diag.info(format!(
             "Parsed {} commands, {} structs (used), {} enums (used), {} aliases (used)",
-            parse_result.commands.len(),
+            commands.len(),
             type_collection.structs.len(),
             type_collection.enums.len(),
             type_collection.aliases.len()
@@ -136,7 +136,7 @@ impl Pipeline {
         // Step 6: Generate TypeScript files
         self.generate_output(
             config,
-            &parse_result,
+            &commands,
             &type_collection.structs,
             &type_collection.enums,
             &type_collection.aliases,
@@ -206,10 +206,10 @@ impl Pipeline {
         rust_files: &[PathBuf],
         config: &Config,
         expanded_code: Option<&str>,
-    ) -> Result<(ParseResult, ModuleResolver, Option<ParsedTypes>)> {
+    ) -> Result<(Vec<TauriCommand>, ModuleResolver, Option<ParsedTypes>)> {
         let mut resolver = ModuleResolver::new();
         let base_path = config.input.source_dir.clone();
-        let mut parse_result = ParseResult::new();
+        let mut commands: Vec<TauriCommand> = Vec::new();
 
         // Store expanded types temporarily - we'll register them AFTER parsing source files
         let mut expanded_types: Option<ParsedTypes> = None;
@@ -254,15 +254,15 @@ impl Pipeline {
 
             // Parse commands
             match parse_commands(&content, file_path) {
-                Ok(commands) => {
-                    if !commands.is_empty() {
+                Ok(file_commands) => {
+                    if !file_commands.is_empty() {
                         self.diag.debug(format!(
                             "Found {} commands in {}",
-                            commands.len(),
+                            file_commands.len(),
                             file_path.display()
                         ));
                     }
-                    parse_result.commands.extend(commands);
+                    commands.extend(file_commands);
                 }
                 Err(e) => {
                     self.diag.warn(format!(
@@ -291,14 +291,14 @@ impl Pipeline {
             }
         }
 
-        Ok((parse_result, resolver, expanded_types))
+        Ok((commands, resolver, expanded_types))
     }
 
     /// Step 6: Generate TypeScript output files
     fn generate_output(
         &self,
         config: &Config,
-        parse_result: &ParseResult,
+        commands: &[TauriCommand],
         filtered_structs: &[RustStruct],
         filtered_enums: &[RustEnum],
         aliases: &[RustTypeAlias],
@@ -334,7 +334,7 @@ impl Pipeline {
 
         // Generate commands.ts
         let commands_content = generate_commands_file(
-            &parse_result.commands,
+            commands,
             &config.output.types_file,
             &config.output.commands_file,
             &ctx,

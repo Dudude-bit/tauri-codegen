@@ -180,15 +180,6 @@ pub fn parse_type_with_context(ty: &Type, generic_params: &HashSet<String>) -> R
     }
 }
 
-/// Short, human-readable category of an `Unknown` type, suitable for warning
-/// messages. Returns `None` if the value isn't an `Unknown`.
-pub fn unknown_kind(ty: &RustType) -> Option<&str> {
-    match ty {
-        RustType::Unknown(label) => Some(label.as_str()),
-        _ => None,
-    }
-}
-
 /// Extract a single generic type argument (for Vec<T>, Option<T>)
 fn extract_single_generic(args: &PathArguments) -> Option<Type> {
     if let PathArguments::AngleBracketed(angle) = args {
