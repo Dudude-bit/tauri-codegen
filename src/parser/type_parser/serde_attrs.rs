@@ -1,9 +1,13 @@
-//! Serde attribute inspection: the leaf helpers that read `#[serde(...)]` and
-//! `#[ts(...)]` annotations off a `syn::Attribute` slice. Extracted from the
-//! parent `type_parser.rs` so the struct/enum parsing path there stays focused
-//! on AST shape rather than attribute parsing.
+//! Serde attribute inspection.
+//!
+//! Every public helper below shares the same underlying walk: iterate
+//! each `#[serde(...)]` (or `#[ts(...)]`) attribute on the slice, parse
+//! its comma-separated contents into `syn::Meta` items, and inspect them.
+//! The shared `for_each_meta_in` combinator lets each helper stay a
+//! short match on the one or two metas it cares about, without repeating
+//! the boilerplate that used to sit in every function.
 
-use syn::{Expr, Lit, Meta};
+use syn::{Expr, Lit, Meta, MetaNameValue};
 
 use crate::utils::{
     to_camel_case, to_kebab_case, to_pascal_case, to_screaming_kebab_case, to_screaming_snake_case,
@@ -23,58 +27,82 @@ pub(super) struct SerdeContainerAttrs {
     pub untagged: bool,
 }
 
-/// Get the serde rename value from attributes if present.
-pub(super) fn get_serde_rename(attrs: &[syn::Attribute]) -> Option<String> {
+// --- shared walk primitives -------------------------------------------
+
+/// Invoke `f(meta)` for every inner `syn::Meta` inside every
+/// `#[<namespace>(...)]` attribute on `attrs`. Non-matching attributes
+/// and unparseable bodies are silently skipped. Early exit: returning
+/// `true` from the callback stops iteration.
+fn for_each_meta_in<F: FnMut(&Meta) -> bool>(attrs: &[syn::Attribute], namespace: &str, mut f: F) {
     for attr in attrs {
-        if let Meta::List(meta_list) = &attr.meta {
-            if meta_list.path.is_ident("serde") {
-                if let Ok(nested) = meta_list.parse_args_with(
-                    syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated,
-                ) {
-                    for meta in nested {
-                        if let Meta::NameValue(nv) = meta {
-                            if nv.path.is_ident("rename") {
-                                if let Expr::Lit(expr_lit) = &nv.value {
-                                    if let Lit::Str(lit_str) = &expr_lit.lit {
-                                        return Some(lit_str.value());
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+        let Meta::List(meta_list) = &attr.meta else {
+            continue;
+        };
+        if !meta_list.path.is_ident(namespace) {
+            continue;
+        }
+        let Ok(nested) = meta_list
+            .parse_args_with(syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated)
+        else {
+            continue;
+        };
+        for meta in &nested {
+            if f(meta) {
+                return;
             }
         }
     }
-    None
+}
+
+/// Extract a `&str` literal from a `NameValue` like `rename = "foo"`.
+fn string_value(nv: &MetaNameValue) -> Option<String> {
+    match &nv.value {
+        Expr::Lit(expr_lit) => match &expr_lit.lit {
+            Lit::Str(s) => Some(s.value()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+// --- public helpers ---------------------------------------------------
+
+/// Get the serde rename value from attributes if present.
+pub(super) fn get_serde_rename(attrs: &[syn::Attribute]) -> Option<String> {
+    let mut found = None;
+    for_each_meta_in(attrs, "serde", |meta| {
+        if let Meta::NameValue(nv) = meta {
+            if nv.path.is_ident("rename") {
+                if let Some(value) = string_value(nv) {
+                    found = Some(value);
+                    return true;
+                }
+            }
+        }
+        false
+    });
+    found
 }
 
 /// Check if a field has `#[ts(optional)]` and validate it's on `Option<T>`.
 pub(super) fn has_ts_optional(attrs: &[syn::Attribute], ty: &crate::models::RustType) -> bool {
-    for attr in attrs {
-        if let Meta::List(meta_list) = &attr.meta {
-            if meta_list.path.is_ident("ts") {
-                if let Ok(nested) = meta_list.parse_args_with(
-                    syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated,
-                ) {
-                    for meta in nested {
-                        if let Meta::Path(path) = meta {
-                            if path.is_ident("optional") {
-                                if matches!(ty, crate::models::RustType::Option(_)) {
-                                    return true;
-                                } else {
-                                    crate::diagnostics::warn(
-                                        "#[ts(optional)] is only valid on Option<T> fields, ignoring",
-                                    );
-                                }
-                            }
-                        }
-                    }
+    let mut result = false;
+    for_each_meta_in(attrs, "ts", |meta| {
+        if let Meta::Path(path) = meta {
+            if path.is_ident("optional") {
+                if matches!(ty, crate::models::RustType::Option(_)) {
+                    result = true;
+                } else {
+                    crate::diagnostics::warn(
+                        "#[ts(optional)] is only valid on Option<T> fields, ignoring",
+                    );
                 }
+                return true;
             }
         }
-    }
-    false
+        false
+    });
+    result
 }
 
 /// Check if a field has `#[serde(skip)]`.
@@ -97,129 +125,83 @@ pub(super) fn has_serde_transparent(attrs: &[syn::Attribute]) -> bool {
     has_serde_path_flag(attrs, "transparent")
 }
 
-/// Check if a field has `#[serde(default)]` or `#[serde(default = "...")]`.
+/// Does `attrs` contain `#[serde(<flag>)]` as a standalone path item?
+fn has_serde_path_flag(attrs: &[syn::Attribute], flag: &str) -> bool {
+    let mut result = false;
+    for_each_meta_in(attrs, "serde", |meta| {
+        if let Meta::Path(path) = meta {
+            if path.is_ident(flag) {
+                result = true;
+                return true;
+            }
+        }
+        false
+    });
+    result
+}
+
+/// Check if a field has `#[serde(default)]` or `#[serde(default = "fn")]`.
 /// Either form makes the field optional on the wire.
 pub(super) fn has_serde_default(attrs: &[syn::Attribute]) -> bool {
-    for attr in attrs {
-        if let syn::Meta::List(meta_list) = &attr.meta {
-            if meta_list.path.is_ident("serde") {
-                if let Ok(nested) = meta_list.parse_args_with(
-                    syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
-                ) {
-                    for meta in nested {
-                        match meta {
-                            syn::Meta::Path(path) if path.is_ident("default") => return true,
-                            syn::Meta::NameValue(nv) if nv.path.is_ident("default") => return true,
-                            _ => {}
-                        }
-                    }
-                }
-            }
+    let mut result = false;
+    for_each_meta_in(attrs, "serde", |meta| match meta {
+        Meta::Path(path) if path.is_ident("default") => {
+            result = true;
+            true
         }
-    }
-    false
+        Meta::NameValue(nv) if nv.path.is_ident("default") => {
+            result = true;
+            true
+        }
+        _ => false,
+    });
+    result
 }
 
-/// Detect `#[serde(skip_serializing_if = "Option::is_none")]`. Users apply
-/// this to `Option<T>` fields to omit them from output when `None`; the
-/// TypeScript binding should mirror that by making the field optional.
+/// Detect `#[serde(skip_serializing_if = "Option::is_none")]` (and any
+/// other `::is_none`-suffixed predicate; users often re-export it from
+/// their own crate). Makes the TS field optional.
 pub(super) fn has_skip_serializing_if_none(attrs: &[syn::Attribute]) -> bool {
-    for attr in attrs {
-        if let syn::Meta::List(meta_list) = &attr.meta {
-            if meta_list.path.is_ident("serde") {
-                if let Ok(nested) = meta_list.parse_args_with(
-                    syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
-                ) {
-                    for meta in nested {
-                        if let syn::Meta::NameValue(nv) = meta {
-                            if nv.path.is_ident("skip_serializing_if") {
-                                if let syn::Expr::Lit(expr_lit) = &nv.value {
-                                    if let syn::Lit::Str(lit) = &expr_lit.lit {
-                                        let v = lit.value();
-                                        // Common idioms we can recognise.
-                                        if v == "Option::is_none" || v.ends_with("::is_none") {
-                                            return true;
-                                        }
-                                    }
-                                }
-                            }
-                        }
+    let mut result = false;
+    for_each_meta_in(attrs, "serde", |meta| {
+        if let Meta::NameValue(nv) = meta {
+            if nv.path.is_ident("skip_serializing_if") {
+                if let Some(value) = string_value(nv) {
+                    if value == "Option::is_none" || value.ends_with("::is_none") {
+                        result = true;
+                        return true;
                     }
                 }
             }
         }
-    }
-    false
-}
-
-/// Shared predicate: does the attrs slice contain `#[serde(<flag>)]`?
-fn has_serde_path_flag(attrs: &[syn::Attribute], flag: &str) -> bool {
-    for attr in attrs {
-        if let Meta::List(meta_list) = &attr.meta {
-            if meta_list.path.is_ident("serde") {
-                if let Ok(nested) = meta_list.parse_args_with(
-                    syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated,
-                ) {
-                    for meta in nested {
-                        if let Meta::Path(path) = meta {
-                            if path.is_ident(flag) {
-                                return true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    false
+        false
+    });
+    result
 }
 
 /// Parse serde container attributes (rename_all, tag, content, untagged).
 pub(super) fn parse_serde_container_attrs(attrs: &[syn::Attribute]) -> SerdeContainerAttrs {
     let mut result = SerdeContainerAttrs::default();
-
-    for attr in attrs {
-        if let Meta::List(meta_list) = &attr.meta {
-            if meta_list.path.is_ident("serde") {
-                if let Ok(nested) = meta_list.parse_args_with(
-                    syn::punctuated::Punctuated::<Meta, syn::Token![,]>::parse_terminated,
-                ) {
-                    for meta in nested {
-                        match meta {
-                            Meta::NameValue(nv) => {
-                                if nv.path.is_ident("rename_all") {
-                                    if let Expr::Lit(expr_lit) = &nv.value {
-                                        if let Lit::Str(lit_str) = &expr_lit.lit {
-                                            result.rename_all = Some(lit_str.value());
-                                        }
-                                    }
-                                } else if nv.path.is_ident("tag") {
-                                    if let Expr::Lit(expr_lit) = &nv.value {
-                                        if let Lit::Str(lit_str) = &expr_lit.lit {
-                                            result.tag = Some(lit_str.value());
-                                        }
-                                    }
-                                } else if nv.path.is_ident("content") {
-                                    if let Expr::Lit(expr_lit) = &nv.value {
-                                        if let Lit::Str(lit_str) = &expr_lit.lit {
-                                            result.content = Some(lit_str.value());
-                                        }
-                                    }
-                                }
-                            }
-                            Meta::Path(path) => {
-                                if path.is_ident("untagged") {
-                                    result.untagged = true;
-                                }
-                            }
-                            _ => {}
-                        }
-                    }
+    for_each_meta_in(attrs, "serde", |meta| {
+        match meta {
+            Meta::NameValue(nv) => {
+                if nv.path.is_ident("rename_all") {
+                    result.rename_all = string_value(nv);
+                } else if nv.path.is_ident("tag") {
+                    result.tag = string_value(nv);
+                } else if nv.path.is_ident("content") {
+                    result.content = string_value(nv);
                 }
             }
+            Meta::Path(path) => {
+                if path.is_ident("untagged") {
+                    result.untagged = true;
+                }
+            }
+            _ => {}
         }
-    }
-
+        false // keep walking; a container may mix several attrs
+    });
     result
 }
 
