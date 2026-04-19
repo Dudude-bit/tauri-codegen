@@ -110,6 +110,38 @@ fn same_type_reached_via_different_paths_is_not_a_conflict() {
 }
 
 #[test]
+fn crate_aliased_path_still_resolves() {
+    // `use crate as my_alias;` followed by `my_alias::types::User`.
+    // Historically easy to miss in resolvers; our simple-name rendering
+    // keeps it working as long as `User` is registered anywhere.
+    let project = Project::with_source(
+        r#"
+        use crate as my_alias;
+        pub mod types {
+            use serde::{Deserialize, Serialize};
+            #[derive(Serialize, Deserialize)]
+            pub struct User { pub id: i32 }
+        }
+
+        #[tauri::command]
+        fn fetch(u: my_alias::types::User) -> Result<my_alias::types::User, String> { todo!() }
+        "#,
+    );
+    run_generate_ok(&project);
+    let commands = std::fs::read_to_string(&project.commands_out).unwrap();
+    assert!(commands.contains("u: User"), "arg type:\n{commands}");
+    assert!(
+        commands.contains("Promise<User>"),
+        "return type:\n{commands}"
+    );
+    assert!(
+        commands.contains("import type { User }"),
+        "import:\n{commands}"
+    );
+    assert!(!commands.contains("my_alias"), "no alias leak:\n{commands}");
+}
+
+#[test]
 fn qualified_path_with_generic_arguments() {
     // Combines path qualification with a generic type — the stripping must
     // happen on *both* the outer and the inner name.
