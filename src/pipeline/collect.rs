@@ -10,6 +10,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::diagnostics::Diagnostics;
 use crate::models::{
@@ -92,7 +93,11 @@ struct CollectState<'a> {
     unresolved: HashMap<String, PathBuf>,
 
     resolved_types: HashMap<String, PathBuf>,
-    parsed_files: HashMap<PathBuf, ParsedTypes>,
+    // Stored behind `Arc` so the drain loop can hand out a cheap handle
+    // to the current file's parse tree without cloning the whole thing
+    // on every iteration. Parsing is append-only within this collector,
+    // so sharing is safe.
+    parsed_files: HashMap<PathBuf, Arc<ParsedTypes>>,
     seen_structs: HashSet<(String, PathBuf)>,
     seen_enums: HashSet<(String, PathBuf)>,
     seen_aliases: HashSet<String>,
@@ -124,8 +129,10 @@ impl<'a> CollectState<'a> {
 
     fn seed_expanded_types(&mut self, expanded_types: Option<&ParsedTypes>) {
         if let Some(parsed) = expanded_types {
+            // The cargo-expand blob is seeded once; wrap it in an Arc
+            // up front so subsequent drain-loop lookups are free.
             self.parsed_files
-                .insert(PathBuf::from("<cargo-expand>"), parsed.clone());
+                .insert(PathBuf::from("<cargo-expand>"), Arc::new(parsed.clone()));
         }
     }
 
@@ -220,7 +227,8 @@ impl<'a> CollectState<'a> {
         };
         match parse_types_with_aliases(&content, type_file) {
             Ok(parsed) => {
-                self.parsed_files.insert(type_file.to_path_buf(), parsed);
+                self.parsed_files
+                    .insert(type_file.to_path_buf(), Arc::new(parsed));
                 true
             }
             Err(e) => {
@@ -246,10 +254,12 @@ impl<'a> CollectState<'a> {
                 continue;
             }
 
-            // Clone the parsed snapshot so we can mutate state below without
-            // holding a borrow into `parsed_files` across `resolve_and_enqueue`.
-            let parsed = match self.parsed_files.get(&type_file).cloned() {
-                Some(p) => p,
+            // Cheap `Arc::clone` of the shared parse tree — same handle,
+            // no bulk data copy. Lets the body below borrow into `parsed`
+            // while still calling `&mut self` methods like
+            // `resolve_and_enqueue` without borrow conflicts.
+            let parsed = match self.parsed_files.get(&type_file) {
+                Some(p) => Arc::clone(p),
                 None => continue,
             };
 
