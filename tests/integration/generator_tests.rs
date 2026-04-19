@@ -7,7 +7,7 @@ use tauri_ts_generator::generator::{
 };
 use tauri_ts_generator::models::{
     CommandArg, EnumRepresentation, EnumVariant, RustEnum, RustStruct, RustType, StructField,
-    TauriCommand, VariantData,
+    StructShape, TauriCommand, VariantData,
 };
 use tauri_ts_generator::parser::{parse_commands, parse_types};
 
@@ -158,6 +158,7 @@ fn test_generate_with_naming_prefix() {
             use_optional: false,
             is_flatten: false,
         }],
+        shape: StructShape::Named,
         source_file: PathBuf::from("test.rs"),
     }];
 
@@ -180,6 +181,7 @@ fn test_generate_with_naming_suffix() {
         name: "User".to_string(),
         generics: vec![],
         fields: vec![],
+        shape: StructShape::Named,
         source_file: PathBuf::from("test.rs"),
     }];
 
@@ -317,6 +319,7 @@ fn test_field_names_match_serde_behavior() {
                 is_flatten: false,
             },
         ],
+        shape: StructShape::Named,
         source_file: PathBuf::from("test.rs"),
     }];
 
@@ -413,6 +416,7 @@ fn test_serde_flatten_generates_intersection_type() {
                     is_flatten: false,
                 },
             ],
+            shape: StructShape::Named,
             source_file: PathBuf::from("test.rs"),
         },
         RustStruct {
@@ -434,6 +438,7 @@ fn test_serde_flatten_generates_intersection_type() {
                     is_flatten: true,
                 },
             ],
+            shape: StructShape::Named,
             source_file: PathBuf::from("test.rs"),
         },
     ];
@@ -469,6 +474,7 @@ fn test_flatten_type_as_command_return() {
                 use_optional: false,
                 is_flatten: false,
             }],
+            shape: StructShape::Named,
             source_file: PathBuf::from("test.rs"),
         },
         RustStruct {
@@ -490,6 +496,7 @@ fn test_flatten_type_as_command_return() {
                     is_flatten: true,
                 },
             ],
+            shape: StructShape::Named,
             source_file: PathBuf::from("test.rs"),
         },
     ];
@@ -535,6 +542,7 @@ fn test_flatten_type_as_command_argument() {
                 use_optional: false,
                 is_flatten: false,
             }],
+            shape: StructShape::Named,
             source_file: PathBuf::from("test.rs"),
         },
         RustStruct {
@@ -556,6 +564,7 @@ fn test_flatten_type_as_command_argument() {
                     is_flatten: true,
                 },
             ],
+            shape: StructShape::Named,
             source_file: PathBuf::from("test.rs"),
         },
     ];

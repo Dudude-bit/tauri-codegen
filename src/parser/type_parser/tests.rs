@@ -163,8 +163,47 @@ fn test_parse_tuple_struct() {
     let point = &structs[0];
     assert_eq!(point.name, "Point");
     assert_eq!(point.fields.len(), 2);
-    assert_eq!(point.fields[0].name, "field0");
-    assert_eq!(point.fields[1].name, "field1");
+    // Tuple struct positions use bare indices (serde-compatible array keys),
+    // and the shape is Tuple so the generator emits `[T1, T2]`.
+    assert_eq!(point.fields[0].name, "0");
+    assert_eq!(point.fields[1].name, "1");
+    assert_eq!(point.shape, crate::models::StructShape::Tuple);
+}
+
+#[test]
+fn test_parse_newtype_struct_has_newtype_shape() {
+    let code = r#"
+        #[derive(Serialize)]
+        pub struct UserId(pub i32);
+    "#;
+    let (structs, _) = parse_types(code, &test_path()).unwrap();
+    assert_eq!(structs[0].shape, crate::models::StructShape::Newtype);
+    assert_eq!(structs[0].fields.len(), 1);
+}
+
+#[test]
+fn test_parse_unit_struct_has_unit_shape() {
+    let code = r#"
+        #[derive(Serialize)]
+        pub struct Marker;
+    "#;
+    let (structs, _) = parse_types(code, &test_path()).unwrap();
+    assert_eq!(structs[0].shape, crate::models::StructShape::Unit);
+    assert!(structs[0].fields.is_empty());
+}
+
+#[test]
+fn test_serde_transparent_forces_newtype_shape() {
+    let code = r#"
+        #[derive(Serialize)]
+        #[serde(transparent)]
+        pub struct Wrapped {
+            pub inner: String,
+        }
+    "#;
+    let (structs, _) = parse_types(code, &test_path()).unwrap();
+    assert_eq!(structs[0].shape, crate::models::StructShape::Newtype);
+    assert_eq!(structs[0].fields.len(), 1);
 }
 
 #[test]

@@ -129,11 +129,11 @@ fn test_parse_complex_types_fixture() {
     let message = enums.iter().find(|e| e.name == "Message").unwrap();
     assert_eq!(message.variants.len(), 4);
 
-    // Check TupleStruct
+    // Check TupleStruct — tuple positions are named with their index.
     let tuple_struct = structs.iter().find(|s| s.name == "TupleStruct").unwrap();
     assert_eq!(tuple_struct.fields.len(), 2);
-    assert_eq!(tuple_struct.fields[0].name, "field0");
-    assert_eq!(tuple_struct.fields[1].name, "field1");
+    assert_eq!(tuple_struct.fields[0].name, "0");
+    assert_eq!(tuple_struct.fields[1].name, "1");
 }
 
 #[test]

@@ -11,8 +11,27 @@ pub struct RustStruct {
     pub generics: Vec<String>,
     /// Struct fields
     pub fields: Vec<StructField>,
+    /// Serialization shape — how serde wires this struct onto the JSON output.
+    /// Derived from the AST form and `#[serde(transparent)]`.
+    pub shape: StructShape,
     /// Source file where the struct was found
     pub source_file: PathBuf,
+}
+
+/// How serde serializes this struct.
+///
+/// - `Named` — `struct Foo { a: T }` → `{ "a": T }`.
+/// - `Newtype` — `struct Foo(T)` or a `#[serde(transparent)]` one-field
+///   struct → `T` (no wrapper).
+/// - `Tuple` — `struct Foo(T1, T2)` → `[T1, T2]`.
+/// - `Unit` — `struct Foo;` → `null`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StructShape {
+    #[default]
+    Named,
+    Newtype,
+    Tuple,
+    Unit,
 }
 
 /// Represents a struct field

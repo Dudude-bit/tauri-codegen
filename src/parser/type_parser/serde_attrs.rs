@@ -91,6 +91,67 @@ pub(super) fn has_serde_flatten(attrs: &[syn::Attribute]) -> bool {
     has_serde_path_flag(attrs, "flatten")
 }
 
+/// Check if a container has `#[serde(transparent)]`. Serde requires this to
+/// appear on a single-field struct and serializes directly as the inner type.
+pub(super) fn has_serde_transparent(attrs: &[syn::Attribute]) -> bool {
+    has_serde_path_flag(attrs, "transparent")
+}
+
+/// Check if a field has `#[serde(default)]` or `#[serde(default = "...")]`.
+/// Either form makes the field optional on the wire.
+pub(super) fn has_serde_default(attrs: &[syn::Attribute]) -> bool {
+    for attr in attrs {
+        if let syn::Meta::List(meta_list) = &attr.meta {
+            if meta_list.path.is_ident("serde") {
+                if let Ok(nested) = meta_list.parse_args_with(
+                    syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+                ) {
+                    for meta in nested {
+                        match meta {
+                            syn::Meta::Path(path) if path.is_ident("default") => return true,
+                            syn::Meta::NameValue(nv) if nv.path.is_ident("default") => return true,
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Detect `#[serde(skip_serializing_if = "Option::is_none")]`. Users apply
+/// this to `Option<T>` fields to omit them from output when `None`; the
+/// TypeScript binding should mirror that by making the field optional.
+pub(super) fn has_skip_serializing_if_none(attrs: &[syn::Attribute]) -> bool {
+    for attr in attrs {
+        if let syn::Meta::List(meta_list) = &attr.meta {
+            if meta_list.path.is_ident("serde") {
+                if let Ok(nested) = meta_list.parse_args_with(
+                    syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated,
+                ) {
+                    for meta in nested {
+                        if let syn::Meta::NameValue(nv) = meta {
+                            if nv.path.is_ident("skip_serializing_if") {
+                                if let syn::Expr::Lit(expr_lit) = &nv.value {
+                                    if let syn::Lit::Str(lit) = &expr_lit.lit {
+                                        let v = lit.value();
+                                        // Common idioms we can recognise.
+                                        if v == "Option::is_none" || v.ends_with("::is_none") {
+                                            return true;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
 /// Shared predicate: does the attrs slice contain `#[serde(<flag>)]`?
 fn has_serde_path_flag(attrs: &[syn::Attribute], flag: &str) -> bool {
     for attr in attrs {

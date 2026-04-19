@@ -11,9 +11,11 @@ use crate::models::{
 };
 
 use super::type_extractor::parse_type_with_context;
+use crate::models::StructShape;
 use expanded::collect_serializable_types;
 use serde_attrs::{
-    apply_rename_all, get_serde_rename, has_serde_flatten, has_serde_skip, has_ts_optional,
+    apply_rename_all, get_serde_rename, has_serde_default, has_serde_flatten, has_serde_skip,
+    has_serde_transparent, has_skip_serializing_if_none, has_ts_optional,
     parse_serde_container_attrs,
 };
 
@@ -282,64 +284,92 @@ fn parse_struct(item: &ItemStruct, source_file: &Path) -> Option<RustStruct> {
     // Create a set for efficient lookup when parsing field types
     let generic_params: HashSet<String> = generics.iter().cloned().collect();
 
-    let fields = match &item.fields {
-        Fields::Named(named) => named
-            .named
-            .iter()
-            .filter_map(|field| {
-                // Skip fields with #[serde(skip)] or similar
-                if has_serde_skip(&field.attrs) {
-                    return None;
-                }
+    let transparent = has_serde_transparent(&item.attrs);
 
-                let field_name = field.ident.as_ref()?.to_string();
-                let field_type = parse_type_with_context(&field.ty, &generic_params);
+    let (fields, mut shape): (Vec<StructField>, StructShape) = match &item.fields {
+        Fields::Named(named) => {
+            let fields: Vec<StructField> = named
+                .named
+                .iter()
+                .filter_map(|field| {
+                    // Skip fields with #[serde(skip)] or similar
+                    if has_serde_skip(&field.attrs) {
+                        return None;
+                    }
 
-                // Check for serde rename attribute
-                let explicit_rename = get_serde_rename(&field.attrs);
-                let final_name = explicit_rename
-                    .clone()
-                    .or_else(|| apply_rename_all(&field_name, &container_attrs.rename_all))
-                    .unwrap_or(field_name);
-                let has_rename = explicit_rename.is_some() || container_attrs.rename_all.is_some();
+                    let field_name = field.ident.as_ref()?.to_string();
+                    let field_type = parse_type_with_context(&field.ty, &generic_params);
 
-                // Check for #[ts(optional)] attribute
-                let use_optional = has_ts_optional(&field.attrs, &field_type);
+                    // Check for serde rename attribute
+                    let explicit_rename = get_serde_rename(&field.attrs);
+                    let final_name = explicit_rename
+                        .clone()
+                        .or_else(|| apply_rename_all(&field_name, &container_attrs.rename_all))
+                        .unwrap_or(field_name);
+                    let has_rename =
+                        explicit_rename.is_some() || container_attrs.rename_all.is_some();
 
-                // Check for #[serde(flatten)] attribute
-                let is_flatten = has_serde_flatten(&field.attrs);
+                    // #[ts(optional)] OR #[serde(default)] OR
+                    // #[serde(skip_serializing_if = "Option::is_none")] on
+                    // an Option<T> — each of these makes the field optional
+                    // in the JSON serde actually emits.
+                    let use_optional = has_ts_optional(&field.attrs, &field_type)
+                        || (matches!(field_type, crate::models::RustType::Option(_))
+                            && (has_serde_default(&field.attrs)
+                                || has_skip_serializing_if_none(&field.attrs)));
 
-                Some(StructField {
-                    name: final_name,
-                    ty: field_type,
-                    has_explicit_rename: has_rename,
-                    use_optional,
-                    is_flatten,
+                    // Check for #[serde(flatten)] attribute
+                    let is_flatten = has_serde_flatten(&field.attrs);
+
+                    Some(StructField {
+                        name: final_name,
+                        ty: field_type,
+                        has_explicit_rename: has_rename,
+                        use_optional,
+                        is_flatten,
+                    })
                 })
-            })
-            .collect(),
+                .collect();
+            (fields, StructShape::Named)
+        }
         Fields::Unnamed(unnamed) => {
-            // Tuple struct - use numbered field names
-            unnamed
+            // Tuple struct — name the positions with their index so the
+            // generator can choose the shape. A single unnamed field is a
+            // newtype and serializes transparently; multi-field tuples
+            // serialize as JSON arrays.
+            let fields: Vec<StructField> = unnamed
                 .unnamed
                 .iter()
                 .enumerate()
                 .map(|(i, field)| StructField {
-                    name: format!("field{}", i),
+                    name: format!("{}", i),
                     ty: parse_type_with_context(&field.ty, &generic_params),
                     has_explicit_rename: false,
                     use_optional: false,
                     is_flatten: false,
                 })
-                .collect()
+                .collect();
+            let shape = if fields.len() == 1 {
+                StructShape::Newtype
+            } else {
+                StructShape::Tuple
+            };
+            (fields, shape)
         }
-        Fields::Unit => Vec::new(),
+        Fields::Unit => (Vec::new(), StructShape::Unit),
     };
+
+    // `#[serde(transparent)]` forces the single-field form, whether the
+    // original was named or tuple.
+    if transparent && fields.len() == 1 {
+        shape = StructShape::Newtype;
+    }
 
     Some(RustStruct {
         name,
         generics,
         fields,
+        shape,
         source_file: source_file.to_path_buf(),
     })
 }

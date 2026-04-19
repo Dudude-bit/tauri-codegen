@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::config::NamingConfig;
-use crate::models::{EnumVariant, RustType, RustTypeAlias, StructField, VariantData};
+use crate::models::{EnumVariant, RustType, RustTypeAlias, StructField, StructShape, VariantData};
 use std::path::PathBuf;
 
 fn test_path() -> PathBuf {
@@ -35,6 +35,7 @@ fn test_generate_simple_interface() {
                 ty: RustType::Primitive("String".to_string()),
             },
         ],
+        shape: StructShape::Named,
         source_file: test_path(),
     };
 
@@ -67,6 +68,7 @@ fn test_generate_interface_with_generics() {
                 ty: RustType::Primitive("i32".to_string()),
             },
         ],
+        shape: StructShape::Named,
         source_file: test_path(),
     };
 
@@ -99,6 +101,7 @@ fn test_generate_interface_with_multiple_generics() {
                 ty: RustType::Generic("V".to_string()),
             },
         ],
+        shape: StructShape::Named,
         source_file: test_path(),
     };
 
@@ -232,6 +235,7 @@ fn test_field_names_preserved_without_serde_attrs() {
                 ty: RustType::Primitive("String".to_string()),
             },
         ],
+        shape: StructShape::Named,
         source_file: test_path(),
     };
 
@@ -249,6 +253,7 @@ fn test_generate_empty_struct() {
         name: "Empty".to_string(),
         generics: vec![],
         fields: vec![],
+        shape: StructShape::Named,
         source_file: test_path(),
     };
 
@@ -298,6 +303,7 @@ fn test_generate_multiple_types() {
                 name: "id".to_string(),
                 ty: RustType::Primitive("i32".to_string()),
             }],
+            shape: StructShape::Named,
             source_file: test_path(),
         },
         RustStruct {
@@ -310,6 +316,7 @@ fn test_generate_multiple_types() {
                 name: "name".to_string(),
                 ty: RustType::Primitive("String".to_string()),
             }],
+            shape: StructShape::Named,
             source_file: test_path(),
         },
     ];
@@ -346,6 +353,7 @@ fn test_type_with_option_field() {
             name: "email".to_string(),
             ty: RustType::Option(Box::new(RustType::Primitive("String".to_string()))),
         }],
+        shape: StructShape::Named,
         source_file: test_path(),
     };
 
@@ -367,6 +375,7 @@ fn test_type_with_vec_field() {
             name: "tags".to_string(),
             ty: RustType::Vec(Box::new(RustType::Primitive("String".to_string()))),
         }],
+        shape: StructShape::Named,
         source_file: test_path(),
     };
 
@@ -382,6 +391,7 @@ fn test_naming_prefix() {
         name: "User".to_string(),
         generics: vec![],
         fields: vec![],
+        shape: StructShape::Named,
         source_file: test_path(),
     };
 
@@ -427,6 +437,7 @@ fn test_field_names_match_serde_serialization() {
                 is_flatten: false,
             },
         ],
+        shape: StructShape::Named,
         source_file: test_path(),
     };
 
@@ -530,6 +541,7 @@ fn test_generate_ts_undefined_field() {
                 is_flatten: false,
             },
         ],
+        shape: StructShape::Named,
         source_file: test_path(),
     };
 
@@ -561,6 +573,7 @@ fn test_generate_interface_with_flatten() {
                 is_flatten: true,
             },
         ],
+        shape: StructShape::Named,
         source_file: test_path(),
     };
 
@@ -612,6 +625,7 @@ fn test_generate_interface_with_multiple_flatten() {
                 is_flatten: true,
             },
         ],
+        shape: StructShape::Named,
         source_file: test_path(),
     };
 
@@ -648,6 +662,7 @@ fn test_generate_interface_only_flatten() {
                 is_flatten: true,
             },
         ],
+        shape: StructShape::Named,
         source_file: test_path(),
     };
 
@@ -672,6 +687,7 @@ fn test_generate_interface_without_flatten_remains_interface() {
             use_optional: false,
             is_flatten: false,
         }],
+        shape: StructShape::Named,
         source_file: test_path(),
     };
 

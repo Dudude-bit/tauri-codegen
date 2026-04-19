@@ -1,4 +1,6 @@
-use crate::models::{EnumRepresentation, RustEnum, RustStruct, RustTypeAlias, VariantData};
+use crate::models::{
+    EnumRepresentation, RustEnum, RustStruct, RustTypeAlias, StructShape, VariantData,
+};
 
 use super::{type_mapper::rust_to_typescript, GeneratorContext};
 
@@ -72,6 +74,35 @@ fn generate_interface(s: &RustStruct, ctx: &GeneratorContext) -> String {
     } else {
         format!("<{}>", s.generics.join(", "))
     };
+
+    // Non-named shapes (unit / newtype / tuple) serialize without an object
+    // wrapper — render them as type aliases that match the JSON shape.
+    match s.shape {
+        StructShape::Unit => {
+            return format!("export type {}{} = null;\n", interface_name, generics_str);
+        }
+        StructShape::Newtype if s.fields.len() == 1 => {
+            let inner = rust_to_typescript(&s.fields[0].ty, ctx);
+            return format!(
+                "export type {}{} = {};\n",
+                interface_name, generics_str, inner
+            );
+        }
+        StructShape::Tuple => {
+            let elems: Vec<String> = s
+                .fields
+                .iter()
+                .map(|f| rust_to_typescript(&f.ty, ctx))
+                .collect();
+            return format!(
+                "export type {}{} = [{}];\n",
+                interface_name,
+                generics_str,
+                elems.join(", ")
+            );
+        }
+        _ => {}
+    }
 
     // Separate normal fields from flattened fields
     let (flatten_fields, normal_fields): (Vec<_>, Vec<_>) =
