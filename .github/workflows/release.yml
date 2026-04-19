@@ -22,6 +22,13 @@ env:
   CARGO_TERM_COLOR: always
   RUSTFLAGS: "-D warnings"
 
+# The default `GITHUB_TOKEN` on repos created with the 2024+ restrictive
+# defaults only has `contents: read`. The create-release step needs
+# `contents: write` to post the draft. Workflow-level grant keeps every
+# job on the narrower scope except the one that actually needs it.
+permissions:
+  contents: write
+
 jobs:
   verify:
     name: verify tagged ref
@@ -94,10 +101,32 @@ jobs:
         # derive crate. Skipped when derive wasn't actually published
         # this run (cheap either way).
         run: sleep 30
-      - name: Publish
+      - name: Publish (idempotent — tolerate "already exists")
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-        run: cargo publish --token "$CARGO_REGISTRY_TOKEN"
+        # Same pattern as publish-derive: if the tag was re-pointed at a
+        # new commit after the upload already succeeded (e.g. recovering
+        # from a downstream step failure like a missing GitHub-release
+        # permission), the second run must not fail the "already
+        # published" error — we still want to reach the release-notes
+        # step. Any other cargo publish error is fatal.
+        run: |
+          set +e
+          MAIN_VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          echo "Local main version: $MAIN_VERSION"
+          output=$(cargo publish --token "$CARGO_REGISTRY_TOKEN" 2>&1)
+          status=$?
+          echo "$output"
+          if [ "$status" -eq 0 ]; then
+            echo "::notice::Published tauri-ts-generator $MAIN_VERSION."
+            exit 0
+          fi
+          if echo "$output" | grep -qiE "already (exists|uploaded) on crates.io"; then
+            echo "::warning::tauri-ts-generator $MAIN_VERSION was already on crates.io; this is a re-run, proceeding to release notes."
+            exit 0
+          fi
+          echo "::error::Publish failed with an unrecognised error; aborting."
+          exit "$status"
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
