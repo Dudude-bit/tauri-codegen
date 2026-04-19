@@ -203,7 +203,7 @@ fn test_generate_command_with_function_prefix_suffix() {
     let commands = vec![TauriCommand {
         name: "get_user".to_string(),
         args: vec![],
-        return_type: Some(RustType::Custom("User".to_string())),
+        return_type: Some(RustType::custom("User")),
         source_file: PathBuf::from("test.rs"),
         rename_all: None,
     }];
@@ -230,7 +230,7 @@ fn test_type_imports_in_commands_file() {
         TauriCommand {
             name: "get_user".to_string(),
             args: vec![],
-            return_type: Some(RustType::Custom("User".to_string())),
+            return_type: Some(RustType::custom("User")),
             source_file: PathBuf::from("test.rs"),
             rename_all: None,
         },
@@ -238,7 +238,7 @@ fn test_type_imports_in_commands_file() {
             name: "create_item".to_string(),
             args: vec![CommandArg {
                 name: "item".to_string(),
-                ty: RustType::Custom("Item".to_string()),
+                ty: RustType::custom("Item"),
             }],
             return_type: None,
             source_file: PathBuf::from("test.rs"),
@@ -432,7 +432,7 @@ fn test_serde_flatten_generates_intersection_type() {
                 },
                 StructField {
                     name: "address".to_string(),
-                    ty: RustType::Custom("Address".to_string()),
+                    ty: RustType::custom("Address"),
                     has_explicit_rename: false,
                     use_optional: false,
                     is_flatten: true,
@@ -490,7 +490,7 @@ fn test_flatten_type_as_command_return() {
                 },
                 StructField {
                     name: "address".to_string(),
-                    ty: RustType::Custom("Address".to_string()),
+                    ty: RustType::custom("Address"),
                     has_explicit_rename: false,
                     use_optional: false,
                     is_flatten: true,
@@ -504,7 +504,7 @@ fn test_flatten_type_as_command_return() {
     let commands = vec![TauriCommand {
         name: "get_user".to_string(),
         args: vec![],
-        return_type: Some(RustType::Custom("User".to_string())),
+        return_type: Some(RustType::custom("User")),
         source_file: PathBuf::from("test.rs"),
         rename_all: None,
     }];
@@ -558,7 +558,7 @@ fn test_flatten_type_as_command_argument() {
                 },
                 StructField {
                     name: "meta".to_string(),
-                    ty: RustType::Custom("Metadata".to_string()),
+                    ty: RustType::custom("Metadata"),
                     has_explicit_rename: false,
                     use_optional: false,
                     is_flatten: true,
@@ -573,7 +573,7 @@ fn test_flatten_type_as_command_argument() {
         name: "create_item".to_string(),
         args: vec![CommandArg {
             name: "request".to_string(),
-            ty: RustType::Custom("CreateRequest".to_string()),
+            ty: RustType::custom("CreateRequest"),
         }],
         return_type: None,
         source_file: PathBuf::from("test.rs"),

@@ -108,7 +108,7 @@ fn test_parse_option_custom_type() {
     let ty = parse_type_str("Option<User>");
     match parse_type(&ty) {
         RustType::Option(inner) => match *inner {
-            RustType::Custom(name) => assert_eq!(name, "User"),
+            RustType::Custom { name, .. } => assert_eq!(name, "User"),
             other => panic!("Expected Custom inside Option, got {:?}", other),
         },
         other => panic!("Expected Option, got {:?}", other),
@@ -120,7 +120,7 @@ fn test_parse_result_type() {
     let ty = parse_type_str("Result<User, String>");
     match parse_type(&ty) {
         RustType::Result(ok) => match *ok {
-            RustType::Custom(name) => assert_eq!(name, "User"),
+            RustType::Custom { name, .. } => assert_eq!(name, "User"),
             other => panic!("Expected Custom inside Result, got {:?}", other),
         },
         other => panic!("Expected Result, got {:?}", other),
@@ -155,7 +155,7 @@ fn test_parse_btreemap_type() {
                 other => panic!("Expected Primitive key, got {:?}", other),
             }
             match *value {
-                RustType::Custom(name) => assert_eq!(name, "User"),
+                RustType::Custom { name, .. } => assert_eq!(name, "User"),
                 other => panic!("Expected Custom value, got {:?}", other),
             }
         }
@@ -199,7 +199,7 @@ fn test_parse_unit_type() {
 fn test_parse_custom_type() {
     let ty = parse_type_str("User");
     match parse_type(&ty) {
-        RustType::Custom(name) => assert_eq!(name, "User"),
+        RustType::Custom { name, .. } => assert_eq!(name, "User"),
         other => panic!("Expected Custom, got {:?}", other),
     }
 }
@@ -210,7 +210,7 @@ fn test_parse_nested_generics() {
     match parse_type(&ty) {
         RustType::Vec(inner) => match *inner {
             RustType::Option(inner2) => match *inner2 {
-                RustType::Custom(name) => assert_eq!(name, "User"),
+                RustType::Custom { name, .. } => assert_eq!(name, "User"),
                 other => panic!("Expected Custom, got {:?}", other),
             },
             other => panic!("Expected Option, got {:?}", other),
@@ -225,7 +225,7 @@ fn test_parse_result_with_vec() {
     match parse_type(&ty) {
         RustType::Result(ok) => match *ok {
             RustType::Vec(inner) => match *inner {
-                RustType::Custom(name) => assert_eq!(name, "Item"),
+                RustType::Custom { name, .. } => assert_eq!(name, "Item"),
                 other => panic!("Expected Custom, got {:?}", other),
             },
             other => panic!("Expected Vec, got {:?}", other),
@@ -252,7 +252,7 @@ fn test_parse_generic_param_not_in_context() {
     let generics = HashSet::new();
 
     match parse_type_with_context(&ty, &generics) {
-        RustType::Custom(name) => assert_eq!(name, "T"),
+        RustType::Custom { name, .. } => assert_eq!(name, "T"),
         other => panic!("Expected Custom (unknown generic), got {:?}", other),
     }
 }
@@ -299,7 +299,7 @@ fn test_parse_reference_string() {
 fn test_parse_box_unwraps_to_inner() {
     let ty = parse_type_str("Box<User>");
     match parse_type(&ty) {
-        RustType::Custom(name) => assert_eq!(name, "User"),
+        RustType::Custom { name, .. } => assert_eq!(name, "User"),
         other => panic!("Expected Custom(User) from Box<User>, got {:?}", other),
     }
 }
@@ -342,7 +342,7 @@ fn test_parse_nested_smart_pointers() {
     let ty = parse_type_str("Vec<Box<User>>");
     match parse_type(&ty) {
         RustType::Vec(inner) => match *inner {
-            RustType::Custom(name) => assert_eq!(name, "User"),
+            RustType::Custom { name, .. } => assert_eq!(name, "User"),
             other => panic!("Expected Custom(User) inside Vec, got {:?}", other),
         },
         other => panic!("Expected Vec, got {:?}", other),
@@ -355,7 +355,7 @@ fn test_parse_option_box_self_ref() {
     let ty = parse_type_str("Option<Box<Node>>");
     match parse_type(&ty) {
         RustType::Option(inner) => match *inner {
-            RustType::Custom(name) => assert_eq!(name, "Node"),
+            RustType::Custom { name, .. } => assert_eq!(name, "Node"),
             other => panic!("Expected Custom(Node) inside Option, got {:?}", other),
         },
         other => panic!("Expected Option, got {:?}", other),

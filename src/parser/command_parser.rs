@@ -242,7 +242,7 @@ mod tests {
 
         match &commands[0].return_type {
             Some(RustType::Result(inner)) => match inner.as_ref() {
-                RustType::Custom(name) => assert_eq!(name, "User"),
+                RustType::Custom { name, .. } => assert_eq!(name, "User"),
                 other => panic!("Expected Custom, got {:?}", other),
             },
             other => panic!("Expected Result, got {:?}", other),

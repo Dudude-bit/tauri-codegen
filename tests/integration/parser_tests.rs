@@ -40,7 +40,7 @@ fn test_parse_simple_commands_fixture() {
     assert_eq!(get_user.args.len(), 1);
     match &get_user.return_type {
         Some(RustType::Result(inner)) => match inner.as_ref() {
-            RustType::Custom(name) => assert_eq!(name, "User"),
+            RustType::Custom { name, .. } => assert_eq!(name, "User"),
             _ => panic!("Expected Custom type inside Result"),
         },
         _ => panic!("Expected Result return type"),
@@ -50,7 +50,7 @@ fn test_parse_simple_commands_fixture() {
     let create_user = commands.iter().find(|c| c.name == "create_user").unwrap();
     assert_eq!(create_user.args.len(), 1);
     match &create_user.args[0].ty {
-        RustType::Custom(name) => assert_eq!(name, "CreateUserRequest"),
+        RustType::Custom { name, .. } => assert_eq!(name, "CreateUserRequest"),
         _ => panic!("Expected CreateUserRequest type"),
     }
 
@@ -59,7 +59,7 @@ fn test_parse_simple_commands_fixture() {
     assert!(get_all.args.is_empty());
     match &get_all.return_type {
         Some(RustType::Vec(inner)) => match inner.as_ref() {
-            RustType::Custom(name) => assert_eq!(name, "User"),
+            RustType::Custom { name, .. } => assert_eq!(name, "User"),
             _ => panic!("Expected Custom type inside Vec"),
         },
         _ => panic!("Expected Vec return type"),

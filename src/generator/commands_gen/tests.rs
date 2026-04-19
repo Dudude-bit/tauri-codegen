@@ -26,7 +26,7 @@ fn test_generate_simple_command() {
             name: "id".to_string(),
             ty: RustType::Primitive("i32".to_string()),
         }],
-        return_type: Some(RustType::Custom("User".to_string())),
+        return_type: Some(RustType::custom("User")),
         source_file: test_path(),
         rename_all: None,
     };
@@ -47,9 +47,7 @@ fn test_generate_command_no_args() {
     let cmd = TauriCommand {
         name: "get_all".to_string(),
         args: vec![],
-        return_type: Some(RustType::Vec(Box::new(RustType::Custom(
-            "Item".to_string(),
-        )))),
+        return_type: Some(RustType::Vec(Box::new(RustType::custom("Item")))),
         source_file: test_path(),
         rename_all: None,
     };
@@ -82,7 +80,7 @@ fn test_generate_command_multiple_args() {
                 ty: RustType::Option(Box::new(RustType::Primitive("String".to_string()))),
             },
         ],
-        return_type: Some(RustType::Custom("User".to_string())),
+        return_type: Some(RustType::custom("User")),
         source_file: test_path(),
         rename_all: None,
     };
@@ -185,7 +183,7 @@ fn test_collect_used_types_from_commands() {
         TauriCommand {
             name: "get_user".to_string(),
             args: vec![],
-            return_type: Some(RustType::Custom("User".to_string())),
+            return_type: Some(RustType::custom("User")),
             source_file: test_path(),
             rename_all: None,
         },
@@ -193,9 +191,9 @@ fn test_collect_used_types_from_commands() {
             name: "create".to_string(),
             args: vec![CommandArg {
                 name: "req".to_string(),
-                ty: RustType::Custom("CreateRequest".to_string()),
+                ty: RustType::custom("CreateRequest"),
             }],
-            return_type: Some(RustType::Custom("User".to_string())),
+            return_type: Some(RustType::custom("User")),
             source_file: test_path(),
             rename_all: None,
         },
@@ -218,7 +216,7 @@ fn test_collect_used_types_nested() {
         name: "get".to_string(),
         args: vec![],
         return_type: Some(RustType::Vec(Box::new(RustType::Option(Box::new(
-            RustType::Custom("User".to_string()),
+            RustType::custom("User"),
         ))))),
         source_file: test_path(),
         rename_all: None,
@@ -300,7 +298,7 @@ fn test_generate_commands_file_with_imports() {
     let commands = vec![TauriCommand {
         name: "get_user".to_string(),
         args: vec![],
-        return_type: Some(RustType::Custom("User".to_string())),
+        return_type: Some(RustType::custom("User")),
         source_file: test_path(),
         rename_all: None,
     }];
@@ -320,7 +318,7 @@ fn test_complex_return_type() {
         name: "search".to_string(),
         args: vec![],
         return_type: Some(RustType::Result(Box::new(RustType::Vec(Box::new(
-            RustType::Custom("User".to_string()),
+            RustType::custom("User"),
         ))))),
         source_file: test_path(),
         rename_all: None,
@@ -339,15 +337,15 @@ fn test_imports_are_sorted() {
         args: vec![
             CommandArg {
                 name: "a".to_string(),
-                ty: RustType::Custom("BType".to_string()),
+                ty: RustType::custom("BType"),
             },
             CommandArg {
                 name: "b".to_string(),
-                ty: RustType::Custom("AType".to_string()),
+                ty: RustType::custom("AType"),
             },
             CommandArg {
                 name: "c".to_string(),
-                ty: RustType::Custom("CType".to_string()),
+                ty: RustType::custom("CType"),
             },
         ],
         return_type: None,

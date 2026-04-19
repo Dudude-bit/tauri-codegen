@@ -331,7 +331,10 @@ impl<'a> CollectState<'a> {
             self.aliases.push(RustTypeAlias {
                 name: alias_name,
                 generics,
-                target: RustType::Custom(original_name),
+                target: RustType::Custom {
+                    name: original_name,
+                    args: Vec::new(),
+                },
                 source_file,
             });
         }

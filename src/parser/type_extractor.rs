@@ -104,10 +104,10 @@ pub fn parse_type_with_context(ty: &Type, generic_params: &HashSet<String>) -> R
                         }
                     }
 
-                    // Custom types (not a known generic param). If the final
-                    // path segment carries generic arguments (e.g. `Page<User>`),
-                    // propagate them into `CustomGeneric` so command signatures
-                    // can carry the concrete instantiation through to TS.
+                    // Custom types (not a known generic param). Generic
+                    // arguments on the final path segment (e.g. `Page<User>`)
+                    // propagate into `Custom.args` so command signatures
+                    // carry the concrete instantiation through to TS.
                     _ => {
                         let full_name = type_path
                             .path
@@ -131,13 +131,9 @@ pub fn parse_type_with_context(ty: &Type, generic_params: &HashSet<String>) -> R
                             _ => Vec::new(),
                         };
 
-                        if args.is_empty() {
-                            RustType::Custom(full_name)
-                        } else {
-                            RustType::CustomGeneric {
-                                name: full_name,
-                                args,
-                            }
+                        RustType::Custom {
+                            name: full_name,
+                            args,
                         }
                     }
                 }

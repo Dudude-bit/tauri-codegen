@@ -36,9 +36,9 @@ fn test_collect_reachable_types_from_commands() {
         name: "process".to_string(),
         args: vec![CommandArg {
             name: "req".to_string(),
-            ty: RustType::Custom("Request".to_string()),
+            ty: RustType::custom("Request"),
         }],
-        return_type: Some(RustType::Custom("Response".to_string())),
+        return_type: Some(RustType::custom("Response")),
         source_file: types_path.clone(),
         rename_all: None,
     }];
@@ -76,7 +76,7 @@ fn test_collect_reachable_types_includes_aliases() {
         name: "get_user".to_string(),
         args: vec![CommandArg {
             name: "user".to_string(),
-            ty: RustType::Custom("UserAlias".to_string()),
+            ty: RustType::custom("UserAlias"),
         }],
         return_type: None,
         source_file: types_path.clone(),
@@ -118,7 +118,7 @@ fn test_collect_reachable_types_detects_conflicts() {
     let commands = vec![TauriCommand {
         name: "get_user".to_string(),
         args: vec![],
-        return_type: Some(RustType::Custom("User".to_string())),
+        return_type: Some(RustType::custom("User")),
         source_file: cmd_path,
         rename_all: None,
     }];
@@ -150,11 +150,11 @@ fn test_filter_tauri_special_types() {
         args: vec![
             CommandArg {
                 name: "state".to_string(),
-                ty: RustType::Custom("State".to_string()),
+                ty: RustType::custom("State"),
             },
             CommandArg {
                 name: "window".to_string(),
-                ty: RustType::Custom("Window".to_string()),
+                ty: RustType::custom("Window"),
             },
             CommandArg {
                 name: "id".to_string(),
@@ -183,7 +183,7 @@ fn test_filter_tauri_app_handle() {
         args: vec![
             CommandArg {
                 name: "app".to_string(),
-                ty: RustType::Custom("AppHandle".to_string()),
+                ty: RustType::custom("AppHandle"),
             },
             CommandArg {
                 name: "data".to_string(),
@@ -219,7 +219,7 @@ fn test_filter_tauri_special_types_via_alias() {
         args: vec![
             CommandArg {
                 name: "state".to_string(),
-                ty: RustType::Custom("MyState".to_string()),
+                ty: RustType::custom("MyState"),
             },
             CommandArg {
                 name: "id".to_string(),
@@ -262,7 +262,7 @@ fn test_collect_reachable_types_handles_self_referential_struct() {
     let commands = vec![TauriCommand {
         name: "get_head".to_string(),
         args: vec![],
-        return_type: Some(RustType::Custom("Node".to_string())),
+        return_type: Some(RustType::custom("Node")),
         source_file: types_path.clone(),
         rename_all: None,
     }];
@@ -302,7 +302,7 @@ fn test_collect_reachable_types_handles_mutually_recursive_structs() {
     let commands = vec![TauriCommand {
         name: "get_a".to_string(),
         args: vec![],
-        return_type: Some(RustType::Custom("A".to_string())),
+        return_type: Some(RustType::custom("A")),
         source_file: types_path.clone(),
         rename_all: None,
     }];

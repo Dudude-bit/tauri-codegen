@@ -277,7 +277,7 @@ fn test_generate_type_alias() {
     let alias = RustTypeAlias {
         name: "UserAlias".to_string(),
         generics: vec![],
-        target: RustType::Custom("User".to_string()),
+        target: RustType::custom("User"),
         source_file: test_path(),
     };
 
@@ -567,7 +567,7 @@ fn test_generate_interface_with_flatten() {
             },
             StructField {
                 name: "address".to_string(),
-                ty: RustType::Custom("Address".to_string()),
+                ty: RustType::custom("Address"),
                 has_explicit_rename: false,
                 use_optional: false,
                 is_flatten: true,
@@ -612,14 +612,14 @@ fn test_generate_interface_with_multiple_flatten() {
             },
             StructField {
                 name: "address".to_string(),
-                ty: RustType::Custom("Address".to_string()),
+                ty: RustType::custom("Address"),
                 has_explicit_rename: false,
                 use_optional: false,
                 is_flatten: true,
             },
             StructField {
                 name: "meta".to_string(),
-                ty: RustType::Custom("Metadata".to_string()),
+                ty: RustType::custom("Metadata"),
                 has_explicit_rename: false,
                 use_optional: false,
                 is_flatten: true,
@@ -649,14 +649,14 @@ fn test_generate_interface_only_flatten() {
         fields: vec![
             StructField {
                 name: "a".to_string(),
-                ty: RustType::Custom("TypeA".to_string()),
+                ty: RustType::custom("TypeA"),
                 has_explicit_rename: false,
                 use_optional: false,
                 is_flatten: true,
             },
             StructField {
                 name: "b".to_string(),
-                ty: RustType::Custom("TypeB".to_string()),
+                ty: RustType::custom("TypeB"),
                 has_explicit_rename: false,
                 use_optional: false,
                 is_flatten: true,

@@ -51,7 +51,7 @@ pub fn rust_to_typescript(rust_type: &RustType, ctx: &GeneratorContext) -> Strin
                 // numbers/strings are fine
                 RustType::Primitive(_) => true,
                 // Custom types (enums, newtypes) are assumed to be valid string/number keys
-                RustType::Custom(_) => true,
+                RustType::Custom { name: _, .. } => true,
                 // Generic Params are assumed to be valid
                 RustType::Generic(_) => true,
                 // Complex types (Vec, Option, etc) cannot be keys in TS Record
@@ -74,12 +74,15 @@ pub fn rust_to_typescript(rust_type: &RustType, ctx: &GeneratorContext) -> Strin
             }
         }
 
-        RustType::Custom(name) => render_custom_name(name, ctx),
-
-        RustType::CustomGeneric { name, args } => {
+        RustType::Custom { name, args } => {
             let base = render_custom_name(name, ctx);
-            let rendered: Vec<String> = args.iter().map(|a| rust_to_typescript(a, ctx)).collect();
-            format!("{}<{}>", base, rendered.join(", "))
+            if args.is_empty() {
+                base
+            } else {
+                let rendered: Vec<String> =
+                    args.iter().map(|a| rust_to_typescript(a, ctx)).collect();
+                format!("{}<{}>", base, rendered.join(", "))
+            }
         }
 
         RustType::Generic(name) => {
@@ -198,23 +201,21 @@ mod tests {
     #[test]
     fn test_option_custom_type() {
         let ctx = ctx_with_type("User");
-        let ty = RustType::Option(Box::new(RustType::Custom("User".to_string())));
+        let ty = RustType::Option(Box::new(RustType::custom("User")));
         assert_eq!(rust_to_typescript(&ty, &ctx), "User | null");
     }
 
     #[test]
     fn test_result_to_typescript() {
         let ctx = ctx_with_type("User");
-        let ty = RustType::Result(Box::new(RustType::Custom("User".to_string())));
+        let ty = RustType::Result(Box::new(RustType::custom("User")));
         assert_eq!(rust_to_typescript(&ty, &ctx), "User");
     }
 
     #[test]
     fn test_result_with_vec() {
         let ctx = ctx_with_type("Item");
-        let ty = RustType::Result(Box::new(RustType::Vec(Box::new(RustType::Custom(
-            "Item".to_string(),
-        )))));
+        let ty = RustType::Result(Box::new(RustType::Vec(Box::new(RustType::custom("Item")))));
         assert_eq!(rust_to_typescript(&ty, &ctx), "Item[]");
     }
 
@@ -233,7 +234,7 @@ mod tests {
         let ctx = ctx_with_type("User");
         let ty = RustType::HashMap {
             key: Box::new(RustType::Primitive("String".to_string())),
-            value: Box::new(RustType::Custom("User".to_string())),
+            value: Box::new(RustType::custom("User")),
         };
         assert_eq!(rust_to_typescript(&ty, &ctx), "Record<string, User>");
     }
@@ -266,14 +267,14 @@ mod tests {
     #[test]
     fn test_custom_type_registered() {
         let ctx = ctx_with_type("User");
-        let ty = RustType::Custom("User".to_string());
+        let ty = RustType::custom("User");
         assert_eq!(rust_to_typescript(&ty, &ctx), "User");
     }
 
     #[test]
     fn test_custom_type_unregistered() {
         let ctx = default_ctx();
-        let ty = RustType::Custom("UnknownType".to_string());
+        let ty = RustType::custom("UnknownType");
         assert_eq!(rust_to_typescript(&ty, &ctx), "UnknownType");
     }
 
@@ -349,7 +350,7 @@ mod tests {
             function_suffix: "".to_string(),
         });
         ctx.register_type("User");
-        let ty = RustType::Custom("User".to_string());
+        let ty = RustType::custom("User");
         assert_eq!(rust_to_typescript(&ty, &ctx), "IUser");
     }
 
@@ -362,7 +363,7 @@ mod tests {
             function_suffix: "".to_string(),
         });
         ctx.register_type("User");
-        let ty = RustType::Custom("User".to_string());
+        let ty = RustType::custom("User");
         assert_eq!(rust_to_typescript(&ty, &ctx), "UserDTO");
     }
 
@@ -370,7 +371,7 @@ mod tests {
     fn test_complex_nested_type() {
         let ctx = ctx_with_type("User");
         let ty = RustType::Result(Box::new(RustType::Vec(Box::new(RustType::Option(
-            Box::new(RustType::Custom("User".to_string())),
+            Box::new(RustType::custom("User")),
         )))));
         assert_eq!(rust_to_typescript(&ty, &ctx), "(User | null)[]");
     }
