@@ -74,21 +74,10 @@ pub fn rust_to_typescript(rust_type: &RustType, ctx: &GeneratorContext) -> Strin
             }
         }
 
-        RustType::Custom(name) => {
-            if ctx.is_custom_type(name) {
-                ctx.format_type_name(name)
-            } else {
-                // Unknown custom type - use the name as-is
-                name.clone()
-            }
-        }
+        RustType::Custom(name) => render_custom_name(name, ctx),
 
         RustType::CustomGeneric { name, args } => {
-            let base = if ctx.is_custom_type(name) {
-                ctx.format_type_name(name)
-            } else {
-                name.clone()
-            };
+            let base = render_custom_name(name, ctx);
             let rendered: Vec<String> = args.iter().map(|a| rust_to_typescript(a, ctx)).collect();
             format!("{}<{}>", base, rendered.join(", "))
         }
@@ -104,6 +93,19 @@ pub fn rust_to_typescript(rust_type: &RustType, ctx: &GeneratorContext) -> Strin
             eprintln!("Warning: Unknown type '{}', using 'unknown'", desc);
             "unknown".to_string()
         }
+    }
+}
+
+/// TypeScript doesn't have module paths, so every `Custom(name)` needs to
+/// be reduced to its final segment before we look it up in the context.
+/// Otherwise a Rust reference like `crate::types::User` leaks into the
+/// generated output verbatim (`crate::types::User` is not valid TS).
+fn render_custom_name(path: &str, ctx: &GeneratorContext) -> String {
+    let simple = path.rsplit("::").next().unwrap_or(path);
+    if ctx.is_custom_type(simple) {
+        ctx.format_type_name(simple)
+    } else {
+        simple.to_string()
     }
 }
 

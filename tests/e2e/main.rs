@@ -15,6 +15,7 @@ mod helpers;
 mod basic;
 mod errors;
 mod init;
+mod path_qualified;
 mod recursive;
 mod rename_all;
 mod serde_features;

@@ -69,14 +69,19 @@ fn collect_used_types(commands: &[TauriCommand], ctx: &GeneratorContext) -> Hash
 /// Collect custom type names from a RustType, filtered by the generator
 /// context (only known-registered types count) and formatted with any
 /// configured prefix/suffix.
+///
+/// A Rust field typed as `crate::types::User` surfaces here as the full
+/// path string; the context registers types by simple name only, so we
+/// reduce to the final segment before both membership check and formatting.
 fn collect_types_from_rust_type(
     ty: &RustType,
     ctx: &GeneratorContext,
     types: &mut HashSet<String>,
 ) {
     crate::models::walk_custom_type_names(ty, &mut |name| {
-        if ctx.is_custom_type(name) {
-            types.insert(ctx.format_type_name(name));
+        let simple = name.rsplit("::").next().unwrap_or(name);
+        if ctx.is_custom_type(simple) {
+            types.insert(ctx.format_type_name(simple));
         }
     });
 }
