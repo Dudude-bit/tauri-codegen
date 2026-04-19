@@ -14,6 +14,7 @@ use crate::config::NamingConfig;
 pub struct GeneratorContext {
     naming: NamingConfig,
     custom_types: HashSet<String>,
+    enum_types: HashSet<String>,
 }
 
 impl GeneratorContext {
@@ -21,17 +22,33 @@ impl GeneratorContext {
         Self {
             naming,
             custom_types: HashSet::new(),
+            enum_types: HashSet::new(),
         }
     }
 
-    /// Add a custom type name to the context.
+    /// Add a custom struct / alias type name to the context.
     pub fn register_type(&mut self, name: &str) {
         self.custom_types.insert(name.to_string());
+    }
+
+    /// Add a custom enum type name. Automatically registers it as a custom
+    /// type as well so the regular membership check continues to work.
+    pub fn register_enum(&mut self, name: &str) {
+        self.custom_types.insert(name.to_string());
+        self.enum_types.insert(name.to_string());
     }
 
     /// Check if a type name is registered as a custom type.
     pub fn is_custom_type(&self, name: &str) -> bool {
         self.custom_types.contains(name)
+    }
+
+    /// Check if a type name is registered as an *enum* (as opposed to a
+    /// struct or alias). Used to warn on misuse, e.g. `#[serde(flatten)]`
+    /// targeting an enum, where the resulting TypeScript intersection with
+    /// a string-union reduces to `never`.
+    pub fn is_enum(&self, name: &str) -> bool {
+        self.enum_types.contains(name)
     }
 
     /// Apply naming configuration to a type name.

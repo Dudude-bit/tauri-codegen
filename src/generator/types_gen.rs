@@ -108,6 +108,27 @@ fn generate_interface(s: &RustStruct, ctx: &GeneratorContext) -> String {
     let (flatten_fields, normal_fields): (Vec<_>, Vec<_>) =
         s.fields.iter().partition(|f| f.is_flatten);
 
+    // `#[serde(flatten)]` requires the flattened field to serialize as a
+    // map. A bare string-union enum (external-tagged unit variants like
+    // `enum Role { Admin, User }`) serializes as a string, which at
+    // runtime panics in serde — and in TypeScript an intersection
+    // `{ … } & "Admin" | "User"` silently reduces to `never`. Warn so
+    // the user notices the misuse instead of only finding out at runtime.
+    for flat in &flatten_fields {
+        if let crate::models::RustType::Custom { name, .. } = &flat.ty {
+            let simple = crate::utils::simple_name(name);
+            if ctx.is_enum(simple) {
+                crate::diagnostics::warn(format!(
+                    "#[serde(flatten)] on field '{}' of struct '{}' targets enum '{}'. \
+                    Serde requires flatten targets to serialize as a map, and a plain \
+                    enum's string union intersects to `never` in TypeScript. \
+                    Use a tag/content representation on '{}' or drop the flatten.",
+                    flat.name, s.name, simple, simple
+                ));
+            }
+        }
+    }
+
     if flatten_fields.is_empty() {
         // No flatten fields - generate regular interface
         output.push_str(&format!(

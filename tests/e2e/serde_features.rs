@@ -115,6 +115,40 @@ fn tag_content_adjacent_enum() {
 }
 
 #[test]
+fn flatten_of_plain_enum_emits_warning() {
+    // `#[serde(flatten)]` on a field whose type is a plain external-tagged
+    // enum like `enum Role { Admin, User }` is a runtime footgun: serde
+    // serializes the enum as a string, flatten needs a map, and the TS
+    // intersection `{ … } & "Admin" | "User"` reduces to `never`. The
+    // generator must surface a warning so the user notices before they
+    // hit production.
+    let project = Project::with_source(
+        r#"
+        use serde::{Deserialize, Serialize};
+
+        #[derive(Serialize, Deserialize)]
+        pub enum Role { Admin, User }
+
+        #[derive(Serialize, Deserialize)]
+        pub struct Account {
+            pub name: String,
+            #[serde(flatten)]
+            pub role: Role,
+        }
+
+        #[tauri::command]
+        fn get() -> Result<Account, String> { todo!() }
+        "#,
+    );
+    let output = crate::helpers::run_generate_ok(&project);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("flatten") && stderr.contains("Role") && stderr.contains("enum"),
+        "expected warning mentioning the flatten-on-enum misuse, got:\n{stderr}"
+    );
+}
+
+#[test]
 fn untagged_enum_produces_union_of_payloads() {
     let project = Project::with_source(
         r#"

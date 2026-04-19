@@ -313,7 +313,7 @@ impl Pipeline {
             ctx.register_type(&s.name);
         }
         for e in filtered_enums {
-            ctx.register_type(&e.name);
+            ctx.register_enum(&e.name);
         }
         for alias in aliases {
             ctx.register_type(&alias.name);
