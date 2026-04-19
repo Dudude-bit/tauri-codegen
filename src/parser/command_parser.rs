@@ -12,11 +12,9 @@ pub fn parse_commands(content: &str, source_file: &Path) -> Result<Vec<TauriComm
 
     for item in syntax.items {
         match item {
-            syn::Item::Fn(ref func) => {
-                if is_tauri_command(func) {
-                    if let Some(cmd) = parse_command_fn(func, source_file) {
-                        commands.push(cmd);
-                    }
+            syn::Item::Fn(ref func) if is_tauri_command(func) => {
+                if let Some(cmd) = parse_command_fn(func, source_file) {
+                    commands.push(cmd);
                 }
             }
             syn::Item::Impl(ref impl_block) => {

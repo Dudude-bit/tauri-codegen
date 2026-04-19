@@ -193,10 +193,8 @@ pub(super) fn parse_serde_container_attrs(attrs: &[syn::Attribute]) -> SerdeCont
                     result.content = string_value(nv);
                 }
             }
-            Meta::Path(path) => {
-                if path.is_ident("untagged") {
-                    result.untagged = true;
-                }
+            Meta::Path(path) if path.is_ident("untagged") => {
+                result.untagged = true;
             }
             _ => {}
         }
