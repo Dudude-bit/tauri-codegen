@@ -16,7 +16,7 @@ use crate::generator::{
 };
 use crate::known_types;
 use crate::models::{ParseResult, RustEnum, RustStruct, RustType, RustTypeAlias};
-use crate::parser::{parse_commands, parse_types_expanded_with_aliases, ParsedTypes};
+use crate::parser::{parse_commands, parse_types, ParseOptions, ParsedTypes};
 use crate::resolver::ModuleResolver;
 use crate::scanner::Scanner;
 
@@ -218,7 +218,7 @@ impl Pipeline {
         if let Some(code) = expanded_code {
             let expanded_path = PathBuf::from("<cargo-expand>");
 
-            match parse_types_expanded_with_aliases(code, &expanded_path) {
+            match parse_types(code, &expanded_path, ParseOptions::EXPANDED_ALL) {
                 Ok(parsed) => {
                     self.diag.debug(format!(
                         "Found {} structs, {} enums, {} aliases from cargo expand",

@@ -861,7 +861,7 @@ pub fn get_resource(name: String) -> Resource {
 #[test]
 fn test_parse_expanded_real_progenitor_output() {
     use std::path::PathBuf;
-    use tauri_ts_generator::parser::parse_types_expanded;
+    use tauri_ts_generator::parser::{parse_types, ParseOptions, ParsedTypes};
 
     // This is actual cargo expand output from progenitor
     let code = r#"
@@ -888,7 +888,8 @@ fn test_parse_expanded_real_progenitor_output() {
         }
     "#;
 
-    let (structs, _) = parse_types_expanded(code, &PathBuf::from("<test>")).unwrap();
+    let ParsedTypes { structs, .. } =
+        parse_types(code, &PathBuf::from("<test>"), ParseOptions::EXPANDED).unwrap();
 
     // Should find both AuthResponse and UserProfile through nested modules
     let names: Vec<&str> = structs.iter().map(|s| s.name.as_str()).collect();
@@ -1135,7 +1136,7 @@ pub fn get_user_v1(id: i32) -> User {
 #[test]
 fn test_cargo_expand_does_not_cause_ambiguity() {
     use std::path::PathBuf;
-    use tauri_ts_generator::parser::parse_types_expanded;
+    use tauri_ts_generator::parser::{parse_types, ParseOptions, ParsedTypes};
     use tauri_ts_generator::resolver::ModuleResolver;
 
     // Simulate cargo-expand output containing DeploymentContainerInfo
@@ -1179,7 +1180,10 @@ fn test_cargo_expand_does_not_cause_ambiguity() {
 
     // Parse cargo-expand output
     let expanded_path = PathBuf::from("<cargo-expand>");
-    let (expanded_structs, _) = parse_types_expanded(cargo_expand_output, &expanded_path).unwrap();
+    let ParsedTypes {
+        structs: expanded_structs,
+        ..
+    } = parse_types(cargo_expand_output, &expanded_path, ParseOptions::EXPANDED).unwrap();
 
     // Verify we found the types in cargo-expand output
     let expanded_names: Vec<&str> = expanded_structs.iter().map(|s| s.name.as_str()).collect();

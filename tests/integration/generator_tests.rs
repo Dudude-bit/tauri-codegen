@@ -9,7 +9,7 @@ use tauri_ts_generator::models::{
     CommandArg, EnumRepresentation, EnumVariant, RustEnum, RustStruct, RustType, StructField,
     StructShape, TauriCommand, VariantData,
 };
-use tauri_ts_generator::parser::{parse_commands, parse_types};
+use tauri_ts_generator::parser::{parse_commands, parse_types, ParseOptions, ParsedTypes};
 
 /// Get path to test fixtures
 fn fixture_path(name: &str) -> PathBuf {
@@ -29,7 +29,8 @@ fn test_generate_types_from_simple_fixture() {
     let content = read_fixture("simple_commands.rs");
     let path = fixture_path("simple_commands.rs");
 
-    let (structs, enums) = parse_types(&content, &path).expect("Failed to parse types");
+    let ParsedTypes { structs, enums, .. } =
+        parse_types(&content, &path, ParseOptions::SOURCE).expect("Failed to parse types");
 
     let mut ctx = GeneratorContext::new(NamingConfig::default());
     for s in &structs {
@@ -67,7 +68,8 @@ fn test_generate_commands_from_simple_fixture() {
     let path = fixture_path("simple_commands.rs");
 
     let commands = parse_commands(&content, &path).expect("Failed to parse commands");
-    let (structs, enums) = parse_types(&content, &path).expect("Failed to parse types");
+    let ParsedTypes { structs, enums, .. } =
+        parse_types(&content, &path, ParseOptions::SOURCE).expect("Failed to parse types");
 
     let mut ctx = GeneratorContext::new(NamingConfig::default());
     for s in &structs {
@@ -115,7 +117,8 @@ fn test_generate_complex_types() {
     let content = read_fixture("complex_types.rs");
     let path = fixture_path("complex_types.rs");
 
-    let (structs, enums) = parse_types(&content, &path).expect("Failed to parse types");
+    let ParsedTypes { structs, enums, .. } =
+        parse_types(&content, &path, ParseOptions::SOURCE).expect("Failed to parse types");
 
     let mut ctx = GeneratorContext::new(NamingConfig::default());
     for s in &structs {

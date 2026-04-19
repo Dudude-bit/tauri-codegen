@@ -20,7 +20,8 @@ fn test_parse_ts_optional_attribute() {
         }
     "#;
 
-    let (structs, _) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { structs, .. } =
+        parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     assert_eq!(structs.len(), 1);
     let config = &structs[0];
 
@@ -48,7 +49,8 @@ fn test_parse_ts_optional_ignored_on_non_option() {
         }
     "#;
 
-    let (structs, _) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { structs, .. } =
+        parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     assert_eq!(structs.len(), 1);
     let config = &structs[0];
 
@@ -72,7 +74,7 @@ fn test_parse_ts_optional_on_struct_variant() {
         }
     "#;
 
-    let (_, enums) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { enums, .. } = parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     assert_eq!(enums.len(), 1);
     let settings = &enums[0];
 
@@ -97,7 +99,8 @@ fn test_parse_simple_struct() {
         }
     "#;
 
-    let (structs, enums) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { structs, enums, .. } =
+        parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     assert_eq!(structs.len(), 1);
     assert_eq!(enums.len(), 0);
 
@@ -118,7 +121,8 @@ fn test_parse_struct_with_generics() {
         }
     "#;
 
-    let (structs, _) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { structs, .. } =
+        parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     assert_eq!(structs.len(), 1);
 
     let wrapper = &structs[0];
@@ -143,7 +147,8 @@ fn test_parse_struct_with_multiple_generics() {
         }
     "#;
 
-    let (structs, _) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { structs, .. } =
+        parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     assert_eq!(structs.len(), 1);
 
     let pair = &structs[0];
@@ -157,7 +162,8 @@ fn test_parse_tuple_struct() {
         pub struct Point(i32, i32);
     "#;
 
-    let (structs, _) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { structs, .. } =
+        parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     assert_eq!(structs.len(), 1);
 
     let point = &structs[0];
@@ -176,7 +182,8 @@ fn test_parse_newtype_struct_has_newtype_shape() {
         #[derive(Serialize)]
         pub struct UserId(pub i32);
     "#;
-    let (structs, _) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { structs, .. } =
+        parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     assert_eq!(structs[0].shape, crate::models::StructShape::Newtype);
     assert_eq!(structs[0].fields.len(), 1);
 }
@@ -187,7 +194,8 @@ fn test_parse_unit_struct_has_unit_shape() {
         #[derive(Serialize)]
         pub struct Marker;
     "#;
-    let (structs, _) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { structs, .. } =
+        parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     assert_eq!(structs[0].shape, crate::models::StructShape::Unit);
     assert!(structs[0].fields.is_empty());
 }
@@ -201,7 +209,8 @@ fn test_serde_transparent_forces_newtype_shape() {
             pub inner: String,
         }
     "#;
-    let (structs, _) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { structs, .. } =
+        parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     assert_eq!(structs[0].shape, crate::models::StructShape::Newtype);
     assert_eq!(structs[0].fields.len(), 1);
 }
@@ -217,7 +226,8 @@ fn test_parse_simple_enum() {
         }
     "#;
 
-    let (structs, enums) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { structs, enums, .. } =
+        parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     assert_eq!(structs.len(), 0);
     assert_eq!(enums.len(), 1);
 
@@ -248,7 +258,7 @@ fn test_parse_enum_with_tuple_data() {
         }
     "#;
 
-    let (_, enums) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { enums, .. } = parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     assert_eq!(enums.len(), 1);
 
     let message = &enums[0];
@@ -280,7 +290,7 @@ fn test_parse_enum_with_struct_variant() {
         }
     "#;
 
-    let (_, enums) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { enums, .. } = parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     assert_eq!(enums.len(), 1);
 
     let role = &enums[0];
@@ -310,7 +320,8 @@ fn test_serde_rename_field() {
         }
     "#;
 
-    let (structs, _) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { structs, .. } =
+        parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     assert_eq!(structs.len(), 1);
 
     let user = &structs[0];
@@ -337,7 +348,8 @@ fn test_serde_rename_all_on_struct_fields() {
         }
     "#;
 
-    let (structs, _) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { structs, .. } =
+        parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     assert_eq!(structs.len(), 1);
 
     let request = &structs[0];
@@ -445,7 +457,8 @@ fn test_serde_rename_all_pascal_case_on_struct_fields() {
         }
     "#;
 
-    let (structs, _) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { structs, .. } =
+        parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     assert_eq!(structs.len(), 1);
 
     let user = &structs[0];
@@ -465,7 +478,8 @@ fn test_field_rename_overrides_container_rename_all() {
         }
     "#;
 
-    let (structs, _) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { structs, .. } =
+        parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     let cfg = &structs[0];
     assert_eq!(cfg.fields[0].name, "API_KEY");
     assert_eq!(cfg.fields[1].name, "otherField");
@@ -483,7 +497,7 @@ fn test_serde_rename_variant() {
         }
     "#;
 
-    let (_, enums) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { enums, .. } = parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     assert_eq!(enums.len(), 1);
 
     let status = &enums[0];
@@ -517,7 +531,8 @@ fn test_ignore_non_serializable() {
         }
     "#;
 
-    let (structs, _) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { structs, .. } =
+        parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     assert_eq!(structs.len(), 1);
     assert_eq!(structs[0].name, "Exported");
 }
@@ -539,7 +554,8 @@ fn test_parse_types_in_mod() {
         }
     "#;
 
-    let (structs, enums) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { structs, enums, .. } =
+        parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     assert_eq!(structs.len(), 1);
     assert_eq!(enums.len(), 1);
     assert_eq!(structs[0].name, "InnerType");
@@ -555,7 +571,8 @@ fn test_deserialize_also_works() {
         }
     "#;
 
-    let (structs, _) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { structs, .. } =
+        parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     assert_eq!(structs.len(), 1);
     assert_eq!(structs[0].name, "Request");
 }
@@ -570,7 +587,7 @@ fn test_source_file_is_set() {
     "#;
 
     let path = PathBuf::from("src/types.rs");
-    let (structs, _) = parse_types(code, &path).unwrap();
+    let ParsedTypes { structs, .. } = parse_types(code, &path, ParseOptions::SOURCE).unwrap();
     assert_eq!(structs.len(), 1);
     assert_eq!(structs[0].source_file, path);
 }
@@ -587,7 +604,8 @@ fn test_complex_field_types() {
         }
     "#;
 
-    let (structs, _) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { structs, .. } =
+        parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     assert_eq!(structs.len(), 1);
     assert_eq!(structs[0].fields.len(), 4);
 
@@ -620,7 +638,8 @@ fn test_parse_expanded_code_with_serde_attrs() {
         }
     "#;
 
-    let (structs, _) = super::parse_types_expanded(code, &test_path()).unwrap();
+    let ParsedTypes { structs, .. } =
+        super::parse_types(code, &test_path(), ParseOptions::EXPANDED).unwrap();
     assert_eq!(structs.len(), 1, "Should find AuthResponse struct");
     assert_eq!(structs[0].name, "AuthResponse");
 }
@@ -636,7 +655,8 @@ fn test_parse_expanded_without_derive_but_with_serde_field_attrs() {
         }
     "#;
 
-    let (structs, _) = super::parse_types_expanded(code, &test_path()).unwrap();
+    let ParsedTypes { structs, .. } =
+        super::parse_types(code, &test_path(), ParseOptions::EXPANDED).unwrap();
     assert_eq!(
         structs.len(),
         1,
@@ -655,7 +675,8 @@ fn test_parse_types_regular_ignores_without_derive() {
         }
     "#;
 
-    let (structs, _) = super::parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { structs, .. } =
+        super::parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     assert_eq!(
         structs.len(),
         0,
@@ -669,7 +690,7 @@ fn test_parse_type_alias_with_generics() {
         pub type Wrapper<T> = Vec<T>;
     "#;
 
-    let parsed = super::parse_types_with_aliases(code, &test_path()).unwrap();
+    let parsed = super::parse_types(code, &test_path(), ParseOptions::SOURCE_ALL).unwrap();
     assert_eq!(parsed.aliases.len(), 1);
     assert_eq!(parsed.aliases[0].name, "Wrapper");
     assert_eq!(parsed.aliases[0].generics, vec!["T"]);
@@ -691,7 +712,8 @@ fn test_serde_skip_fields_are_excluded() {
         }
     "#;
 
-    let (structs, _) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { structs, .. } =
+        parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     assert_eq!(structs.len(), 1);
     // Only #[serde(skip)] should be excluded
     // skip_serializing and skip_deserializing are directional and should be kept
@@ -715,7 +737,7 @@ fn test_serde_skip_in_enum_variant_struct() {
         }
     "#;
 
-    let (_, enums) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { enums, .. } = parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     assert_eq!(enums.len(), 1);
 
     match &enums[0].variants[0].data {
@@ -744,7 +766,8 @@ fn test_parse_serde_flatten() {
         }
     "#;
 
-    let (structs, _) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { structs, .. } =
+        parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     assert_eq!(structs.len(), 2);
 
     let user = structs.iter().find(|s| s.name == "User").unwrap();
@@ -786,7 +809,8 @@ fn test_parse_multiple_serde_flatten() {
         }
     "#;
 
-    let (structs, _) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { structs, .. } =
+        parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     let user = structs.iter().find(|s| s.name == "User").unwrap();
 
     assert_eq!(user.fields.len(), 3);
@@ -812,7 +836,8 @@ fn test_parse_serde_flatten_with_other_attrs() {
         }
     "#;
 
-    let (structs, _) = parse_types(code, &test_path()).unwrap();
+    let ParsedTypes { structs, .. } =
+        parse_types(code, &test_path(), ParseOptions::SOURCE).unwrap();
     let outer = structs.iter().find(|s| s.name == "Outer").unwrap();
 
     assert_eq!(outer.fields[0].name, "customName");

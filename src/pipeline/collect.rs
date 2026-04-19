@@ -17,7 +17,7 @@ use crate::models::{
     walk_custom_type_names, RustEnum, RustStruct, RustType, RustTypeAlias, TauriCommand,
     VariantData,
 };
-use crate::parser::{parse_types_with_aliases, ParsedTypes};
+use crate::parser::{parse_types, ParseOptions, ParsedTypes};
 use crate::resolver::{ModuleResolver, ResolutionResult};
 use crate::utils::simple_name;
 
@@ -225,7 +225,7 @@ impl<'a> CollectState<'a> {
                 return false;
             }
         };
-        match parse_types_with_aliases(&content, type_file) {
+        match parse_types(&content, type_file, ParseOptions::SOURCE_ALL) {
             Ok(parsed) => {
                 self.parsed_files
                     .insert(type_file.to_path_buf(), Arc::new(parsed));

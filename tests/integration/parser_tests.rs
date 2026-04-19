@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 use tauri_ts_generator::models::RustType;
-use tauri_ts_generator::parser::{parse_commands, parse_types};
+use tauri_ts_generator::parser::{parse_commands, parse_types, ParseOptions, ParsedTypes};
 
 /// Get path to test fixtures
 fn fixture_path(name: &str) -> PathBuf {
@@ -75,7 +75,8 @@ fn test_parse_simple_types_fixture() {
     let content = read_fixture("simple_commands.rs");
     let path = fixture_path("simple_commands.rs");
 
-    let (structs, enums) = parse_types(&content, &path).expect("Failed to parse types");
+    let ParsedTypes { structs, enums, .. } =
+        parse_types(&content, &path, ParseOptions::SOURCE).expect("Failed to parse types");
 
     assert_eq!(structs.len(), 2);
     assert_eq!(enums.len(), 1);
@@ -107,7 +108,8 @@ fn test_parse_complex_types_fixture() {
     let content = read_fixture("complex_types.rs");
     let path = fixture_path("complex_types.rs");
 
-    let (structs, enums) = parse_types(&content, &path).expect("Failed to parse types");
+    let ParsedTypes { structs, enums, .. } =
+        parse_types(&content, &path, ParseOptions::SOURCE).expect("Failed to parse types");
 
     // Check Wrapper<T>
     let wrapper = structs.iter().find(|s| s.name == "Wrapper").unwrap();
@@ -142,7 +144,8 @@ fn test_parse_nested_modules_fixture() {
     let path = fixture_path("nested_modules.rs");
 
     let commands = parse_commands(&content, &path).expect("Failed to parse commands");
-    let (structs, enums) = parse_types(&content, &path).expect("Failed to parse types");
+    let ParsedTypes { structs, enums, .. } =
+        parse_types(&content, &path, ParseOptions::SOURCE).expect("Failed to parse types");
 
     // Should find commands in nested modules
     assert!(commands.iter().any(|c| c.name == "get_inner"));

@@ -27,33 +27,69 @@ pub struct ParsedTypes {
     pub aliases: Vec<RustTypeAlias>,
 }
 
-/// Parse a Rust source file and extract structs and enums
-pub fn parse_types(content: &str, source_file: &Path) -> Result<(Vec<RustStruct>, Vec<RustEnum>)> {
-    let parsed = parse_types_internal(content, source_file, false, false)?;
-    Ok((parsed.structs, parsed.enums))
+/// Switches that control the discovery strategy.
+///
+/// Two orthogonal choices collapse into four presets:
+///
+/// * **Where the input came from** — a plain Rust source file (where
+///   `#[derive(Serialize)]` is still an attribute text) versus the
+///   output of `cargo expand` (where the derive has already been
+///   replaced by an explicit `impl Serialize for Foo` block).
+/// * **Whether to filter to types that carry a serde derive** — the
+///   pipeline collects everything it can reach so the resolver has a
+///   complete view; tests usually want filtering on so they can
+///   exercise it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ParseOptions {
+    /// Input is `cargo expand` output rather than raw source.
+    pub expanded: bool,
+    /// Include every struct/enum/alias, not just ones with serde derives.
+    pub include_all: bool,
 }
 
-/// Parse expanded Rust code (from cargo expand) and extract structs and enums
-/// This uses different detection logic since derive macros are already expanded
-pub fn parse_types_expanded(
+impl ParseOptions {
+    /// Source file, only types with `#[derive(Serialize)]` / `Deserialize`.
+    /// The typical "show me what the user wrote" mode.
+    pub const SOURCE: Self = Self {
+        expanded: false,
+        include_all: false,
+    };
+    /// Source file, every struct/enum/alias regardless of serde attrs.
+    /// Used by the reachable-type walker — if a command signature
+    /// names a type, we want its definition even without a derive.
+    pub const SOURCE_ALL: Self = Self {
+        expanded: false,
+        include_all: true,
+    };
+    /// `cargo expand` output, only types with a serde impl.
+    pub const EXPANDED: Self = Self {
+        expanded: true,
+        include_all: false,
+    };
+    /// `cargo expand` output, every type. Used by the pipeline to
+    /// register macro-generated types that aren't visible in source.
+    pub const EXPANDED_ALL: Self = Self {
+        expanded: true,
+        include_all: true,
+    };
+}
+
+/// Parse a Rust source buffer and return the types it defines.
+///
+/// Replaces the previous four `parse_types*` wrappers (`parse_types`,
+/// `parse_types_with_aliases`, `parse_types_expanded`,
+/// `parse_types_expanded_with_aliases`) — the distinctions now live in
+/// `ParseOptions`. Destructure `ParsedTypes` when you only care about a
+/// subset of the output:
+/// `let ParsedTypes { structs, .. } = parse_types(code, path, ParseOptions::SOURCE)?;`
+pub fn parse_types(
     content: &str,
     source_file: &Path,
-) -> Result<(Vec<RustStruct>, Vec<RustEnum>)> {
-    let parsed = parse_types_internal(content, source_file, true, false)?;
-    Ok((parsed.structs, parsed.enums))
+    options: ParseOptions,
+) -> Result<ParsedTypes> {
+    parse_types_internal(content, source_file, options.expanded, options.include_all)
 }
 
-/// Parse a Rust source file and extract structs, enums, and type aliases
-pub fn parse_types_with_aliases(content: &str, source_file: &Path) -> Result<ParsedTypes> {
-    parse_types_internal(content, source_file, false, true)
-}
-
-/// Parse expanded Rust code (from cargo expand) and extract structs, enums, and type aliases
-pub fn parse_types_expanded_with_aliases(content: &str, source_file: &Path) -> Result<ParsedTypes> {
-    parse_types_internal(content, source_file, true, true)
-}
-
-/// Internal parsing function
 fn parse_types_internal(
     content: &str,
     source_file: &Path,
