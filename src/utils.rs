@@ -1,78 +1,111 @@
-/// Convert snake_case to camelCase
-/// Handles edge cases like double underscores, leading underscores, and trailing underscores
-pub fn to_camel_case(s: &str) -> String {
-    let mut result = String::new();
-    let mut capitalize_next = false;
-    let mut seen_non_underscore = false;
+//! Identifier case conversions that match serde's `rename_all` semantics.
+//!
+//! Serde treats runs of uppercase letters as word boundaries the same way a
+//! human would: `HTTPServer` is two words (`HTTP`, `Server`) not five
+//! (`H`, `T`, `T`, `P`, `Server`). The earlier naive implementation here
+//! emitted `h_t_t_p_server` for `rename_all = "snake_case"`, which diverges
+//! from the runtime JSON. These helpers fix that by splitting on both
+//! lower→upper and acronym→lower boundaries.
 
-    for c in s.chars() {
-        if c == '_' {
-            // Only capitalize next if we've seen a non-underscore character
-            // This prevents leading underscores from capitalizing the first letter
-            if seen_non_underscore {
-                capitalize_next = true;
+/// Split an identifier into its constituent lowercase words.
+/// Handles:
+///  * camelCase: `userId` → `["user", "id"]`
+///  * PascalCase: `GetUser` → `["get", "user"]`
+///  * acronyms: `HTTPServer` → `["http", "server"]`
+///  * trailing acronyms: `ParseJSON` → `["parse", "json"]`
+///  * digits as boundaries: `foo1Bar` → `["foo1", "bar"]`
+///  * existing separators: `user_id`, `user-id` → `["user", "id"]`
+///  * leading / repeated underscores collapse (`__private_field` → `["private", "field"]`)
+fn split_words(s: &str) -> Vec<String> {
+    let chars: Vec<char> = s.chars().collect();
+    let mut words: Vec<String> = Vec::new();
+    let mut current = String::new();
+
+    let flush = |current: &mut String, words: &mut Vec<String>| {
+        if !current.is_empty() {
+            words.push(std::mem::take(current).to_lowercase());
+        }
+    };
+
+    for i in 0..chars.len() {
+        let c = chars[i];
+
+        // Explicit separators: always a boundary.
+        if c == '_' || c == '-' || c == ' ' {
+            flush(&mut current, &mut words);
+            continue;
+        }
+
+        if c.is_uppercase() && !current.is_empty() {
+            let prev = chars[i - 1];
+            let next = chars.get(i + 1).copied();
+
+            // camelCase boundary: `userId` → `user` | `Id`
+            // digit boundary:    `foo1Bar` → `foo1` | `Bar`
+            // acronym→lower:     `HTTPServer` → `HTTP` | `Server`
+            //                    (previous char is uppercase AND next is lowercase)
+            let is_camel = prev.is_lowercase() || prev.is_ascii_digit();
+            let is_acronym_end = prev.is_uppercase() && next.is_some_and(|n| n.is_lowercase());
+
+            if is_camel || is_acronym_end {
+                flush(&mut current, &mut words);
             }
-            // Skip the underscore (don't add to result)
-        } else if capitalize_next {
-            result.push(c.to_ascii_uppercase());
-            capitalize_next = false;
-            seen_non_underscore = true;
-        } else if !seen_non_underscore {
-            // First non-underscore character: lowercase it
-            result.push(c.to_ascii_lowercase());
-            seen_non_underscore = true;
-        } else {
-            result.push(c);
         }
-    }
 
-    result
+        current.push(c);
+    }
+    flush(&mut current, &mut words);
+
+    words
 }
 
-/// Convert PascalCase to snake_case
-pub fn to_snake_case(s: &str) -> String {
-    let mut result = String::new();
-    for (i, c) in s.chars().enumerate() {
-        if c.is_uppercase() && i > 0 {
-            result.push('_');
-        }
-        result.push(c.to_ascii_lowercase());
+/// snake_case → camelCase, PascalCase → camelCase, etc.
+/// Matches serde's `rename_all = "camelCase"` behaviour: the first word
+/// stays fully lowercase, every subsequent word is capitalised.
+pub fn to_camel_case(s: &str) -> String {
+    let mut words = split_words(s).into_iter();
+    let mut result = words.next().unwrap_or_default();
+    for word in words {
+        result.push_str(&capitalise_first(&word));
     }
     result
 }
 
-/// Convert snake_case (or PascalCase) to PascalCase.
-/// Safe to apply to already-PascalCase input: it round-trips via snake_case.
+/// snake_case → PascalCase. `HTTPServer` → `HttpServer`.
 pub fn to_pascal_case(s: &str) -> String {
-    let snake = to_snake_case(s);
     let mut result = String::new();
-    let mut capitalize_next = true;
-    for c in snake.chars() {
-        if c == '_' {
-            capitalize_next = true;
-        } else if capitalize_next {
-            result.push(c.to_ascii_uppercase());
-            capitalize_next = false;
-        } else {
-            result.push(c);
-        }
+    for word in split_words(s) {
+        result.push_str(&capitalise_first(&word));
     }
     result
 }
 
-/// Convert PascalCase to SCREAMING_SNAKE_CASE
+/// `HTTPServer` → `http_server`.
+pub fn to_snake_case(s: &str) -> String {
+    split_words(s).join("_")
+}
+
+/// `HTTPServer` → `HTTP_SERVER`.
 pub fn to_screaming_snake_case(s: &str) -> String {
     to_snake_case(s).to_uppercase()
 }
 
-/// Convert PascalCase to kebab-case
+/// `HTTPServer` → `http-server`.
 pub fn to_kebab_case(s: &str) -> String {
-    to_snake_case(s).replace('_', "-")
+    split_words(s).join("-")
 }
 
-/// Convert PascalCase to SCREAMING-KEBAB-CASE
+/// `HTTPServer` → `HTTP-SERVER`.
 pub fn to_screaming_kebab_case(s: &str) -> String {
     to_kebab_case(s).to_uppercase()
+}
+
+fn capitalise_first(word: &str) -> String {
+    let mut chars = word.chars();
+    match chars.next() {
+        Some(first) => first.to_ascii_uppercase().to_string() + chars.as_str(),
+        None => String::new(),
+    }
 }
 
 #[cfg(test)]
@@ -80,53 +113,94 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_to_camel_case_basic() {
-        assert_eq!(to_camel_case("get_user"), "getUser");
-        assert_eq!(to_camel_case("get_user_by_id"), "getUserById");
-        assert_eq!(to_camel_case("hello"), "hello");
-        assert_eq!(to_camel_case("HELLO"), "hELLO");
+    fn snake_case_basic() {
+        assert_eq!(to_snake_case("user_id"), "user_id");
+        assert_eq!(to_snake_case("userId"), "user_id");
+        assert_eq!(to_snake_case("GetUser"), "get_user");
+        assert_eq!(to_snake_case("hello"), "hello");
     }
 
     #[test]
-    fn test_to_camel_case_edge_cases() {
-        // Double underscores - skipped
+    fn snake_case_acronyms() {
+        // This used to produce "h_t_t_p_server" — the cardinal bug behind
+        // broken `rename_all = "snake_case"` on enum variants.
+        assert_eq!(to_snake_case("HTTPServer"), "http_server");
+        assert_eq!(to_snake_case("URLParser"), "url_parser");
+        assert_eq!(to_snake_case("XMLHttp"), "xml_http");
+        assert_eq!(to_snake_case("HTTP"), "http");
+        assert_eq!(to_snake_case("ABC"), "abc");
+        assert_eq!(to_snake_case("ParseJSON"), "parse_json");
+    }
+
+    #[test]
+    fn snake_case_digits_and_separators() {
+        assert_eq!(to_snake_case("foo1Bar"), "foo1_bar");
+        assert_eq!(to_snake_case("get_user_1"), "get_user_1");
+        assert_eq!(to_snake_case("user-id"), "user_id");
+    }
+
+    #[test]
+    fn camel_case_basic() {
+        assert_eq!(to_camel_case("get_user"), "getUser");
+        assert_eq!(to_camel_case("get_user_by_id"), "getUserById");
+        assert_eq!(to_camel_case("hello"), "hello");
+        // All-caps one-word input is a single word → fully lowercase.
+        // The previous implementation returned "hELLO", which no language's
+        // camelCase convention allows.
+        assert_eq!(to_camel_case("HELLO"), "hello");
+    }
+
+    #[test]
+    fn camel_case_edge_cases() {
         assert_eq!(to_camel_case("get__user"), "getUser");
-        // Leading underscore - should NOT capitalize first letter
         assert_eq!(to_camel_case("_private"), "private");
-        // Multiple leading underscores
         assert_eq!(to_camel_case("__private_field"), "privateField");
-        // Trailing underscore - just ignored
         assert_eq!(to_camel_case("trailing_"), "trailing");
-        // Single letter
         assert_eq!(to_camel_case("a"), "a");
-        // Numbers
         assert_eq!(to_camel_case("get_user_1"), "getUser1");
     }
 
     #[test]
-    fn test_to_camel_case_already_camel() {
+    fn camel_case_already_camel() {
         assert_eq!(to_camel_case("getUser"), "getUser");
         assert_eq!(to_camel_case("getUserById"), "getUserById");
     }
 
     #[test]
-    fn test_to_pascal_case_from_snake() {
+    fn camel_case_acronyms() {
+        assert_eq!(to_camel_case("HTTPServer"), "httpServer");
+        assert_eq!(to_camel_case("URLParser"), "urlParser");
+        assert_eq!(to_camel_case("ParseJSON"), "parseJson");
+    }
+
+    #[test]
+    fn pascal_case_from_snake() {
         assert_eq!(to_pascal_case("user_id"), "UserId");
         assert_eq!(to_pascal_case("get_user_by_id"), "GetUserById");
         assert_eq!(to_pascal_case("hello"), "Hello");
     }
 
     #[test]
-    fn test_to_pascal_case_round_trip_from_pascal() {
+    fn pascal_case_round_trip_from_pascal() {
         assert_eq!(to_pascal_case("GetUser"), "GetUser");
-        // All-caps acronyms survive the snake_case round-trip unchanged.
-        assert_eq!(to_pascal_case("HTTP"), "HTTP");
+        // `HTTP` is now treated as one lowercase word and title-cased:
+        // `Http`. The previous behaviour kept the all-caps form, but that
+        // only happened by accident of the buggy snake-case split.
+        assert_eq!(to_pascal_case("HTTP"), "Http");
+        assert_eq!(to_pascal_case("HTTPServer"), "HttpServer");
     }
 
     #[test]
-    fn test_to_pascal_case_edge_cases() {
+    fn pascal_case_edge_cases() {
         assert_eq!(to_pascal_case(""), "");
         assert_eq!(to_pascal_case("a"), "A");
         assert_eq!(to_pascal_case("get__user"), "GetUser");
+    }
+
+    #[test]
+    fn kebab_and_screaming_forms() {
+        assert_eq!(to_kebab_case("HTTPServer"), "http-server");
+        assert_eq!(to_screaming_snake_case("HTTPServer"), "HTTP_SERVER");
+        assert_eq!(to_screaming_kebab_case("HTTPServer"), "HTTP-SERVER");
     }
 }

@@ -132,6 +132,28 @@ fn field_rename_overrides_container_rename_all() {
 }
 
 #[test]
+fn snake_case_handles_acronyms_correctly() {
+    // Regression: `HTTPServer` must become `http_server`, not
+    // `h_t_t_p_server`. Affects every variant name with an acronym.
+    let project = Project::with_source(
+        r#"
+        use serde::{Deserialize, Serialize};
+        #[derive(Serialize, Deserialize)]
+        #[serde(rename_all = "snake_case")]
+        pub enum Msg { HTTPServer, URLParser, XMLHttp, ParseJSON }
+        #[tauri::command]
+        fn x() -> Result<Msg, String> { todo!() }
+        "#,
+    );
+    run_generate_ok(&project);
+    let types = std::fs::read_to_string(&project.types_out).unwrap();
+    assert!(types.contains(r#""http_server""#), "HTTPServer:\n{types}");
+    assert!(types.contains(r#""url_parser""#), "URLParser:\n{types}");
+    assert!(types.contains(r#""xml_http""#), "XMLHttp:\n{types}");
+    assert!(types.contains(r#""parse_json""#), "ParseJSON:\n{types}");
+}
+
+#[test]
 fn enum_with_rename_all_transforms_variants() {
     let project = Project::with_source(
         r#"

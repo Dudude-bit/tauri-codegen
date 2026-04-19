@@ -149,7 +149,8 @@ mod tests {
         assert_eq!(to_camel_case("get_user"), "getUser");
         assert_eq!(to_camel_case("get_user_by_id"), "getUserById");
         assert_eq!(to_camel_case("hello"), "hello");
-        assert_eq!(to_camel_case("HELLO"), "hELLO");
+        // All-caps input is a single word → fully lowercase.
+        assert_eq!(to_camel_case("HELLO"), "hello");
     }
 
     #[test]
