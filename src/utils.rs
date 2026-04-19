@@ -1,4 +1,9 @@
-//! Identifier case conversions that match serde's `rename_all` semantics.
+//! Identifier and path helpers shared across parsing and rendering.
+//!
+//! Case conversions match serde's `rename_all` semantics (see `split_words`
+//! below). `simple_name` strips Rust module paths down to the final
+//! identifier — TypeScript has no concept of `crate::module::Type`, so every
+//! place that renders a Rust type reference to TS must call it.
 //!
 //! Serde treats runs of uppercase letters as word boundaries the same way a
 //! human would: `HTTPServer` is two words (`HTTP`, `Server`) not five
@@ -100,6 +105,14 @@ pub fn to_screaming_kebab_case(s: &str) -> String {
     to_kebab_case(s).to_uppercase()
 }
 
+/// Reduce a `::`-separated Rust path to its final segment. A pure-name
+/// input passes through unchanged. Used everywhere we need to render or
+/// look up a type by its simple identifier (TypeScript output, generator
+/// context membership checks, Tauri-special-type filtering).
+pub fn simple_name(path: &str) -> &str {
+    path.rsplit("::").next().unwrap_or(path)
+}
+
 fn capitalise_first(word: &str) -> String {
     let mut chars = word.chars();
     match chars.next() {
@@ -195,6 +208,15 @@ mod tests {
         assert_eq!(to_pascal_case(""), "");
         assert_eq!(to_pascal_case("a"), "A");
         assert_eq!(to_pascal_case("get__user"), "GetUser");
+    }
+
+    #[test]
+    fn simple_name_strips_path_segments() {
+        assert_eq!(simple_name("crate::types::User"), "User");
+        assert_eq!(simple_name("types::User"), "User");
+        assert_eq!(simple_name("User"), "User");
+        assert_eq!(simple_name(""), "");
+        assert_eq!(simple_name("super::super::Foo"), "Foo");
     }
 
     #[test]

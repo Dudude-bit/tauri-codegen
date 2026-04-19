@@ -79,7 +79,7 @@ fn collect_types_from_rust_type(
     types: &mut HashSet<String>,
 ) {
     crate::models::walk_custom_type_names(ty, &mut |name| {
-        let simple = name.rsplit("::").next().unwrap_or(name);
+        let simple = crate::utils::simple_name(name);
         if ctx.is_custom_type(simple) {
             types.insert(ctx.format_type_name(simple));
         }

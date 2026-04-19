@@ -101,7 +101,7 @@ pub fn rust_to_typescript(rust_type: &RustType, ctx: &GeneratorContext) -> Strin
 /// Otherwise a Rust reference like `crate::types::User` leaks into the
 /// generated output verbatim (`crate::types::User` is not valid TS).
 fn render_custom_name(path: &str, ctx: &GeneratorContext) -> String {
-    let simple = path.rsplit("::").next().unwrap_or(path);
+    let simple = crate::utils::simple_name(path);
     if ctx.is_custom_type(simple) {
         ctx.format_type_name(simple)
     } else {

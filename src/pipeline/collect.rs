@@ -18,6 +18,7 @@ use crate::models::{
 };
 use crate::parser::{parse_types_with_aliases, ParsedTypes};
 use crate::resolver::{ModuleResolver, ResolutionResult};
+use crate::utils::simple_name;
 
 /// Result of type collection with potential conflicts.
 pub struct TypeCollectionResult {
@@ -48,23 +49,32 @@ pub fn collect_reachable_types(
     state.into_result()
 }
 
-/// Returns every `Custom(name)` leaf from a `RustType`, sorted and deduped.
-fn custom_types(ty: &RustType) -> Vec<String> {
+/// Walk every `RustType` in `roots`, collecting the names of every
+/// `Custom` (or `CustomGeneric`) leaf into a sorted, deduped `Vec`.
+///
+/// One helper used by both the struct-field walk and the enum-variant
+/// walk; the only difference is which `RustType`s feed in.
+fn collect_custom<'a, I: IntoIterator<Item = &'a RustType>>(roots: I) -> Vec<String> {
     let mut set: HashSet<String> = HashSet::new();
-    walk_custom_type_names(ty, &mut |name| {
-        set.insert(name.to_string());
-    });
+    for ty in roots {
+        walk_custom_type_names(ty, &mut |name| {
+            set.insert(name.to_string());
+        });
+    }
     let mut out: Vec<String> = set.into_iter().collect();
     out.sort();
     out
 }
 
-/// Same, but aggregated across every field in a struct variant.
+fn custom_types(ty: &RustType) -> Vec<String> {
+    collect_custom(std::iter::once(ty))
+}
+
 fn custom_types_from_variant(data: &VariantData) -> Vec<String> {
     match data {
         VariantData::Unit => Vec::new(),
-        VariantData::Tuple(types) => types.iter().flat_map(custom_types).collect(),
-        VariantData::Struct(fields) => fields.iter().flat_map(|f| custom_types(&f.ty)).collect(),
+        VariantData::Tuple(types) => collect_custom(types.iter()),
+        VariantData::Struct(fields) => collect_custom(fields.iter().map(|f| &f.ty)),
     }
 }
 
@@ -127,48 +137,42 @@ impl<'a> CollectState<'a> {
     }
 
     fn resolve_and_enqueue(&mut self, type_name: &str, from_file: &Path) {
-        let simple_name = type_name
-            .split("::")
-            .last()
-            .unwrap_or(type_name)
-            .to_string();
+        let name = simple_name(type_name).to_string();
 
         match self.resolver.resolve_type(type_name, from_file) {
             ResolutionResult::Found(source) => {
-                if let Some(existing) = self.resolved_types.get(&simple_name).cloned() {
+                if let Some(existing) = self.resolved_types.get(&name).cloned() {
                     if existing != source {
-                        self.add_conflict_path(&simple_name, &existing);
-                        self.add_conflict_path(&simple_name, &source);
+                        self.add_conflict_path(&name, &existing);
+                        self.add_conflict_path(&name, &source);
                     }
                 } else {
-                    self.resolved_types
-                        .insert(simple_name.clone(), source.clone());
-                    self.to_process.push((simple_name, source));
+                    self.resolved_types.insert(name.clone(), source.clone());
+                    self.to_process.push((name, source));
                 }
             }
             ResolutionResult::FoundWithAlias(source, original_name) => {
-                if let Some(existing) = self.resolved_types.get(&simple_name).cloned() {
+                if let Some(existing) = self.resolved_types.get(&name).cloned() {
                     if existing != source {
-                        self.add_conflict_path(&simple_name, &existing);
-                        self.add_conflict_path(&simple_name, &source);
+                        self.add_conflict_path(&name, &existing);
+                        self.add_conflict_path(&name, &source);
                     }
                 } else {
-                    self.resolved_types
-                        .insert(simple_name.clone(), source.clone());
+                    self.resolved_types.insert(name.clone(), source.clone());
                 }
                 self.reexport_aliases
-                    .entry(simple_name)
+                    .entry(name)
                     .or_insert_with(|| (original_name.clone(), source.clone()));
                 self.to_process.push((original_name, source));
             }
             ResolutionResult::Ambiguous(paths) => {
                 for path in paths {
-                    self.add_conflict_path(&simple_name, &path);
+                    self.add_conflict_path(&name, &path);
                 }
             }
             ResolutionResult::NotFound => {
                 self.unresolved
-                    .entry(simple_name)
+                    .entry(name)
                     .or_insert_with(|| from_file.to_path_buf());
             }
         }

@@ -402,11 +402,8 @@ impl Pipeline {
             cmd.args.retain(|arg| {
                 // Get the base type name from the RustType
                 let type_name = match &arg.ty {
-                    RustType::Custom(name) => {
-                        // Extract just the type name (without path)
-                        name.split("::").last().unwrap_or(name).to_string()
-                    }
-                    RustType::Unknown(name) => name.split("::").last().unwrap_or(name).to_string(),
+                    RustType::Custom(name) => crate::utils::simple_name(name).to_string(),
+                    RustType::Unknown(name) => crate::utils::simple_name(name).to_string(),
                     _ => return true, // Keep primitives, Vec, Option, etc.
                 };
 
