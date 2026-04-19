@@ -1,7 +1,9 @@
 # Rust
 /target/
 **/*.rs.bk
-Cargo.lock
+# Cargo.lock is tracked on purpose: this workspace ships a binary crate
+# (`tauri-ts-generator`). Reproducible builds + `cargo check --locked`
+# in the MSRV CI job both depend on it.
 
 # IDE
 .idea/
