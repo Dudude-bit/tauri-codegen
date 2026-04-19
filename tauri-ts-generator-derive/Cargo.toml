@@ -2,7 +2,7 @@
 name = "tauri-ts-generator-derive"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.80"
 description = "Derive macro for tauri-ts-generator to enable #[ts(...)] attributes"
 authors = ["kirillinakin <kirillinyakin@yandex.ru>"]
 repository = "https://github.com/Dudude-bit/tauri-codegen"

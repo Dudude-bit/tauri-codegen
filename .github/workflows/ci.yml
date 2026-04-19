@@ -33,14 +33,15 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
 
   msrv:
-    name: msrv (1.75)
+    name: msrv (1.80)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.75
+      - uses: dtolnay/rust-toolchain@1.80
       - uses: Swatinem/rust-cache@v2
       # Only check the package + library, no tests/dev-deps. Dev tooling
-      # (insta, etc.) is allowed to require newer Rust.
+      # (insta, etc.) is allowed to require newer Rust. Cargo.lock is v4
+      # (written by 1.78+), so this job needs at least 1.78 to parse it.
       - run: cargo check --workspace --locked
 
   test:
