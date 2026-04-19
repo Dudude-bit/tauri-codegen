@@ -93,6 +93,81 @@ fn serde_transparent_named_struct_emits_inner() {
 }
 
 #[test]
+fn option_of_option_collapses_to_single_null() {
+    // Serde collapses `Option<Option<T>>` on the wire (both Nones become
+    // `null`), so the TypeScript must not stack `| null | null`.
+    let types = types_for(
+        r#"
+        use serde::{Deserialize, Serialize};
+        #[derive(Serialize, Deserialize)]
+        pub struct Thing { pub maybe: Option<Option<i32>> }
+        #[tauri::command]
+        fn x() -> Result<Thing, String> { todo!() }
+        "#,
+    );
+    assert!(
+        types.contains("maybe: number | null;"),
+        "should be single null, got:\n{types}"
+    );
+    assert!(
+        !types.contains("| null | null"),
+        "redundant nulls:\n{types}"
+    );
+}
+
+#[test]
+fn serde_default_makes_field_optional() {
+    // `#[serde(default)]` (or `default = "fn"`) allows the field to be
+    // omitted from the JSON; the TS binding must reflect that with `?`.
+    let types = types_for(
+        r#"
+        use serde::{Deserialize, Serialize};
+        fn default_retries() -> i32 { 3 }
+        #[derive(Serialize, Deserialize)]
+        pub struct Config {
+            pub name: String,
+            #[serde(default)]
+            pub theme: Option<String>,
+            #[serde(default = "default_retries")]
+            pub retries: Option<i32>,
+        }
+        #[tauri::command]
+        fn x() -> Result<Config, String> { todo!() }
+        "#,
+    );
+    assert!(types.contains("name: string;"), "{types}");
+    assert!(
+        types.contains("theme?: string;"),
+        "serde(default) must make theme optional, got:\n{types}"
+    );
+    assert!(
+        types.contains("retries?: number;"),
+        "serde(default = fn) must make retries optional, got:\n{types}"
+    );
+}
+
+#[test]
+fn skip_serializing_if_none_makes_option_optional() {
+    let types = types_for(
+        r#"
+        use serde::{Deserialize, Serialize};
+        #[derive(Serialize, Deserialize)]
+        pub struct Req {
+            pub id: i32,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            pub note: Option<String>,
+        }
+        #[tauri::command]
+        fn x() -> Result<Req, String> { todo!() }
+        "#,
+    );
+    assert!(
+        types.contains("note?: string;"),
+        "skip_serializing_if = Option::is_none must emit optional:\n{types}"
+    );
+}
+
+#[test]
 fn newtype_wrapping_custom_type() {
     let types = types_for(
         r#"

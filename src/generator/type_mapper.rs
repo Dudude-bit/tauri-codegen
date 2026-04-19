@@ -23,7 +23,14 @@ pub fn rust_to_typescript(rust_type: &RustType, ctx: &GeneratorContext) -> Strin
         }
 
         RustType::Option(inner) => {
-            let inner_ts = rust_to_typescript(inner, ctx);
+            // Serde collapses `Option<Option<T>>` — the outer `None` and
+            // inner `None` both become `null` on the wire. Mirror that
+            // collapse so the TS type doesn't end up as `T | null | null`.
+            let mut current: &RustType = inner;
+            while let RustType::Option(deeper) = current {
+                current = deeper;
+            }
+            let inner_ts = rust_to_typescript(current, ctx);
             format!("{} | null", inner_ts)
         }
 
