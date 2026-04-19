@@ -52,24 +52,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - name: Publish (skip if already at this version)
+      - name: Publish (idempotent — tolerate "already exists")
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
         run: |
-          set -e
+          # `cargo search` turned out to be unreliable for this check — the
+          # sparse-index query occasionally returns empty for a crate that
+          # definitely exists, and we then try to upload a version that's
+          # already there. Trust cargo publish's own answer instead: attempt
+          # the upload, accept the specific "already exists" error as a
+          # signal to move on (the derive crate is along for the ride —
+          # only the main crate tag drives releases), and fail on anything
+          # else.
+          set +e
           DERIVE_VERSION=$(grep -m1 '^version' tauri-ts-generator-derive/Cargo.toml | cut -d'"' -f2)
-          # `cargo search` asks crates.io for the current published version.
-          # The grep is anchored to avoid matching e.g. "tauri-ts-generator-derive-foo".
-          PUBLISHED=$(cargo search tauri-ts-generator-derive --limit 1 \
-            | awk -F'"' '/^tauri-ts-generator-derive = / {print $2}')
-          echo "Local  derive version: $DERIVE_VERSION"
-          echo "Latest on crates.io:  ${PUBLISHED:-<none>}"
-          if [ "$DERIVE_VERSION" = "$PUBLISHED" ]; then
-            echo "::notice::Derive $DERIVE_VERSION already on crates.io — skipping publish."
+          echo "Local derive version: $DERIVE_VERSION"
+          cd tauri-ts-generator-derive
+          output=$(cargo publish --token "$CARGO_REGISTRY_TOKEN" 2>&1)
+          status=$?
+          echo "$output"
+          if [ "$status" -eq 0 ]; then
+            echo "::notice::Published derive $DERIVE_VERSION."
             exit 0
           fi
-          cd tauri-ts-generator-derive
-          cargo publish --token "$CARGO_REGISTRY_TOKEN"
+          if echo "$output" | grep -qiE "already (exists|uploaded) on crates.io"; then
+            echo "::notice::Derive $DERIVE_VERSION already on crates.io — proceeding."
+            exit 0
+          fi
+          echo "::error::Publish failed with an unrecognised error; aborting."
+          exit "$status"
 
   publish-main:
     name: publish tauri-ts-generator
