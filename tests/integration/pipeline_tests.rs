@@ -1236,8 +1236,7 @@ fn test_cargo_expand_does_not_cause_ambiguity() {
     // AFTER THE FIX: register_expanded_type() was removed, so only source files
     // register types.
     let locations = resolver
-        .type_definitions
-        .get("DeploymentContainerInfo")
+        .type_definitions_for("DeploymentContainerInfo")
         .unwrap();
     assert_eq!(
         locations.len(), 1,

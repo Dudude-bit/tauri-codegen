@@ -62,20 +62,38 @@ pub struct ImportedType {
     pub path: ModulePath,
 }
 
-/// Module resolver that tracks all files and their scopes
+/// Module resolver that tracks all files and their scopes.
+///
+/// Fields are crate-visible so the `resolver::imports` submodule and
+/// in-crate tests can read them; external users of the library can't,
+/// and must go through the `resolve_*`/`register_*` accessors. This
+/// gives us a single place to maintain the invariant that
+/// `type_definitions` and `files[_].local_types` stay consistent.
 #[derive(Debug, Default)]
 pub struct ModuleResolver {
     /// File path -> FileScope
-    pub files: HashMap<PathBuf, FileScope>,
+    pub(crate) files: HashMap<PathBuf, FileScope>,
     /// Type name -> list of files that define it
-    pub type_definitions: HashMap<String, Vec<PathBuf>>,
+    pub(crate) type_definitions: HashMap<String, Vec<PathBuf>>,
     /// Module path -> file path (e.g., ["crate", "internal"] -> src/internal.rs)
-    pub module_to_file: HashMap<Vec<String>, PathBuf>,
+    pub(crate) module_to_file: HashMap<Vec<String>, PathBuf>,
 }
 
 impl ModuleResolver {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Source files that define a type with the given simple name. Returns
+    /// `None` if the name was never registered. Borrowed slice so callers
+    /// don't have to clone.
+    pub fn type_definitions_for(&self, name: &str) -> Option<&[PathBuf]> {
+        self.type_definitions.get(name).map(|v| v.as_slice())
+    }
+
+    /// Read-only access to the scope recorded for a given source file.
+    pub fn file_scope(&self, path: &Path) -> Option<&FileScope> {
+        self.files.get(path)
     }
 
     /// Resolve a type name in the context of a specific file
