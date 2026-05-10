@@ -1,52 +1,23 @@
 use crate::models::{CommandArg, RustType, TauriCommand};
 use anyhow::Result;
 use std::path::Path;
-use syn::{FnArg, ItemFn, ReturnType};
+use syn::{FnArg, ReturnType};
 
 use super::type_extractor::parse_type;
 
-/// Parse a Rust source file and extract Tauri commands
+/// Parse a Rust source file and extract Tauri commands.
+///
+/// Looks for `#[tauri::command]` (or `#[command]`) on free fns, impl
+/// methods, and items inside inline `mod` blocks at any depth.
 pub fn parse_commands(content: &str, source_file: &Path) -> Result<Vec<TauriCommand>> {
     let syntax = syn::parse_file(content)?;
     let mut commands = Vec::new();
-
-    for item in syntax.items {
-        match item {
-            syn::Item::Fn(ref func) if is_tauri_command(func) => {
-                if let Some(cmd) = parse_command_fn(func, source_file) {
-                    commands.push(cmd);
-                }
-            }
-            syn::Item::Impl(ref impl_block) => {
-                // Also check for functions inside impl blocks
-                for impl_item in &impl_block.items {
-                    if let syn::ImplItem::Fn(method) = impl_item {
-                        if is_tauri_command_method(method) {
-                            if let Some(cmd) = parse_command_method(method, source_file) {
-                                commands.push(cmd);
-                            }
-                        }
-                    }
-                }
-            }
-            syn::Item::Mod(ref module) => {
-                // Check for functions inside mod blocks
-                if let Some((_, ref items)) = module.content {
-                    for mod_item in items {
-                        if let syn::Item::Fn(func) = mod_item {
-                            if is_tauri_command(func) {
-                                if let Some(cmd) = parse_command_fn(func, source_file) {
-                                    commands.push(cmd);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-
+    walk_for_commands(
+        &syntax.items,
+        &|_sig, attrs| attrs.iter().any(is_tauri_command_attr),
+        source_file,
+        &mut commands,
+    );
     Ok(commands)
 }
 
@@ -55,9 +26,9 @@ pub fn parse_commands(content: &str, source_file: &Path) -> Result<Vec<TauriComm
 /// `#[tauri::command]` is a procedural macro, so by the time the source
 /// has been through `cargo expand` the attribute is gone — the original
 /// `fn name(...)` remains, and the macro has emitted a sibling
-/// `__cmd__name` mod plus a `pub use __cmd__name;` re-export. The
-/// re-export is what Tauri's `generate_handler!` macro keys off, so it
-/// is the most reliable post-expansion marker we have.
+/// `pub use __cmd__name;` re-export. The re-export is what Tauri's
+/// `generate_handler!` macro keys off, so it is the most reliable
+/// post-expansion marker we have.
 ///
 /// Strategy: walk the expanded module tree, collect every `__cmd__X`
 /// name that appears in a `use` item, then walk again and accept any
@@ -73,22 +44,79 @@ pub fn parse_commands(content: &str, source_file: &Path) -> Result<Vec<TauriComm
 ///   produce a phantom command. In practice this is a non-issue —
 ///   intended for the output of `cargo expand`, where the prefix only
 ///   appears as a Tauri-emitted marker.
-/// * **`rename_all` is silently dropped.** Expansion consumes the
-///   `#[tauri::command(rename_all = "...")]` attribute and bakes the
-///   renaming into the generated `__cmd__X` shim, not back into a
-///   surviving attribute on `fn X`. Macro-generated commands that need
-///   `rename_all` are therefore not honoured by this path. Tauri's own
-///   `macro_rules!` patterns rarely use `rename_all`, so this hasn't
-///   blocked real consumers; if it ever does, parsing the `__cmd__X`
-///   mod body is the place to recover it.
+/// * **`rename_all` is unrecoverable on this path.** Expansion
+///   consumes the `#[tauri::command(rename_all = "...")]` attribute on
+///   the `lib` side and leaves only a `pub use __cmd__X;` re-export;
+///   the body that bakes the renaming in is generated *on the consumer
+///   side* by `tauri::generate_handler!`, which lives in a different
+///   crate (`main.rs`) and is not part of the expanded output we're
+///   parsing. There is no recovery path short of cross-crate macro
+///   expansion. Macro-generated `#[tauri::command]` items that depend
+///   on `rename_all` will therefore be emitted with default casing;
+///   write the command directly in source (so `parse_commands` picks
+///   up the intact attribute) if that matters.
 pub fn parse_expanded_commands(content: &str, source_file: &Path) -> Result<Vec<TauriCommand>> {
     let syntax = syn::parse_file(content)?;
     let mut command_names = std::collections::HashSet::new();
     collect_expanded_command_names(&syntax.items, &mut command_names);
 
     let mut commands = Vec::new();
-    extract_commands_by_name(&syntax.items, &command_names, source_file, &mut commands);
+    walk_for_commands(
+        &syntax.items,
+        &|sig, _attrs| command_names.contains(&sig.ident.to_string()),
+        source_file,
+        &mut commands,
+    );
     Ok(commands)
+}
+
+/// Single walker shared by [`parse_commands`] and
+/// [`parse_expanded_commands`]. Recursively descends into inline
+/// modules and impl blocks at any depth, applying `is_command` to each
+/// function signature + attribute list to decide whether to materialise
+/// a `TauriCommand`.
+///
+/// The two call sites differ only in the predicate they supply
+/// (attribute check vs name-set check), so the walker stays generic
+/// over `Fn(&Signature, &[Attribute]) -> bool`.
+fn walk_for_commands<F>(
+    items: &[syn::Item],
+    is_command: &F,
+    source_file: &Path,
+    out: &mut Vec<TauriCommand>,
+) where
+    F: Fn(&syn::Signature, &[syn::Attribute]) -> bool,
+{
+    for item in items {
+        match item {
+            syn::Item::Fn(func) if is_command(&func.sig, &func.attrs) => {
+                out.push(parse_command_from_signature(
+                    &func.sig,
+                    &func.attrs,
+                    source_file,
+                ));
+            }
+            syn::Item::Impl(impl_block) => {
+                for impl_item in &impl_block.items {
+                    if let syn::ImplItem::Fn(method) = impl_item {
+                        if is_command(&method.sig, &method.attrs) {
+                            out.push(parse_command_from_signature(
+                                &method.sig,
+                                &method.attrs,
+                                source_file,
+                            ));
+                        }
+                    }
+                }
+            }
+            syn::Item::Mod(module) => {
+                if let Some((_, inner)) = &module.content {
+                    walk_for_commands(inner, is_command, source_file, out);
+                }
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Recursively gather every `X` from `pub use __cmd__X;` (and bare
@@ -139,45 +167,6 @@ fn walk_use_tree(tree: &syn::UseTree, names: &mut std::collections::HashSet<Stri
     }
 }
 
-fn extract_commands_by_name(
-    items: &[syn::Item],
-    names: &std::collections::HashSet<String>,
-    source_file: &Path,
-    out: &mut Vec<TauriCommand>,
-) {
-    for item in items {
-        match item {
-            syn::Item::Fn(func) if names.contains(&func.sig.ident.to_string()) => {
-                if let Some(cmd) = parse_command_fn(func, source_file) {
-                    out.push(cmd);
-                }
-            }
-            syn::Item::Impl(impl_block) => {
-                for impl_item in &impl_block.items {
-                    if let syn::ImplItem::Fn(method) = impl_item {
-                        if names.contains(&method.sig.ident.to_string()) {
-                            if let Some(cmd) = parse_command_method(method, source_file) {
-                                out.push(cmd);
-                            }
-                        }
-                    }
-                }
-            }
-            syn::Item::Mod(module) => {
-                if let Some((_, inner)) = &module.content {
-                    extract_commands_by_name(inner, names, source_file, out);
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-/// Check if a function has the #[tauri::command] attribute
-fn is_tauri_command(func: &ItemFn) -> bool {
-    func.attrs.iter().any(is_tauri_command_attr)
-}
-
 /// Check if an attribute is #[tauri::command] or #[command] (with or without arguments)
 fn is_tauri_command_attr(attr: &syn::Attribute) -> bool {
     let path = match &attr.meta {
@@ -190,11 +179,6 @@ fn is_tauri_command_attr(attr: &syn::Attribute) -> bool {
     // Check for #[tauri::command] or #[command]
     (segments.len() == 2 && segments[0] == "tauri" && segments[1] == "command")
         || (segments.len() == 1 && segments[0] == "command")
-}
-
-/// Check if a method has the #[tauri::command] attribute
-fn is_tauri_command_method(method: &syn::ImplItemFn) -> bool {
-    method.attrs.iter().any(is_tauri_command_attr)
 }
 
 /// Extract rename_all value from #[tauri::command(rename_all = "...")]
@@ -242,24 +226,6 @@ fn parse_command_from_signature(
         source_file: source_file.to_path_buf(),
         rename_all,
     }
-}
-
-/// Parse a function into a TauriCommand
-fn parse_command_fn(func: &ItemFn, source_file: &Path) -> Option<TauriCommand> {
-    Some(parse_command_from_signature(
-        &func.sig,
-        &func.attrs,
-        source_file,
-    ))
-}
-
-/// Parse a method into a TauriCommand
-fn parse_command_method(method: &syn::ImplItemFn, source_file: &Path) -> Option<TauriCommand> {
-    Some(parse_command_from_signature(
-        &method.sig,
-        &method.attrs,
-        source_file,
-    ))
 }
 
 /// Parse a function argument
@@ -564,5 +530,158 @@ mod tests {
         let commands = parse_commands(code, &test_path()).unwrap();
         assert_eq!(commands.len(), 1);
         assert_eq!(commands[0].rename_all, Some("snake_case".to_string()));
+    }
+
+    // ---- Recursion / depth coverage for `parse_commands` -----------------
+    //
+    // Pre-2.0.3 the walker descended only one level into `Item::Mod` and
+    // looked at `Item::Fn` only inside it — `Item::Impl` blocks and any
+    // deeper mod nesting were silently dropped. These tests pin the
+    // post-refactor contract: discovery is recursive in both directions.
+
+    #[test]
+    fn parse_commands_finds_command_in_nested_mod() {
+        let code = r#"
+            mod outer {
+                mod inner {
+                    #[tauri::command]
+                    fn deep_command(id: i32) -> String {
+                        unimplemented!()
+                    }
+                }
+            }
+        "#;
+
+        let commands = parse_commands(code, &test_path()).unwrap();
+        assert_eq!(commands.len(), 1, "nested-mod command must be found");
+        assert_eq!(commands[0].name, "deep_command");
+    }
+
+    #[test]
+    fn parse_commands_finds_command_in_impl_inside_mod() {
+        let code = r#"
+            mod commands {
+                impl Service {
+                    #[tauri::command]
+                    fn from_impl(id: i32) -> i32 { id }
+                }
+            }
+        "#;
+
+        let commands = parse_commands(code, &test_path()).unwrap();
+        assert_eq!(commands.len(), 1, "impl-inside-mod command must be found");
+        assert_eq!(commands[0].name, "from_impl");
+    }
+
+    #[test]
+    fn parse_commands_finds_command_in_nested_impl_inside_mod() {
+        // Combination case — both wrappings at once.
+        let code = r#"
+            mod outer {
+                mod inner {
+                    impl Service {
+                        #[tauri::command]
+                        fn deeply_buried(x: bool) -> bool { x }
+                    }
+                }
+            }
+        "#;
+
+        let commands = parse_commands(code, &test_path()).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].name, "deeply_buried");
+    }
+
+    // ---- `parse_expanded_commands` --------------------------------------
+    //
+    // Post-cargo-expand the `#[tauri::command]` attribute is gone. The
+    // only surviving marker is the proc-macro's `pub use __cmd__name;`
+    // re-export. These tests pin that the expanded-path parser keys off
+    // the marker and not the attribute, and that the walker shares the
+    // same recursion contract as `parse_commands`.
+
+    #[test]
+    fn parse_expanded_commands_picks_up_bare_fn_with_cmd_marker() {
+        let code = r#"
+            pub async fn subscribe_pod_watch(namespace: String) -> Result<String, String> {
+                Ok(namespace)
+            }
+            #[allow(unused_imports)]
+            pub use __cmd__subscribe_pod_watch;
+        "#;
+
+        let commands = parse_expanded_commands(code, &test_path()).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].name, "subscribe_pod_watch");
+        assert_eq!(commands[0].args.len(), 1);
+        assert_eq!(commands[0].args[0].name, "namespace");
+    }
+
+    #[test]
+    fn parse_expanded_commands_handles_grouped_reexport() {
+        // Real cargo-expand output groups multiple re-exports:
+        //   pub use {__cmd__foo, __tauri_command_name_foo};
+        let code = r#"
+            pub async fn camel_case_cmd(my_arg: i32) -> i32 { my_arg }
+            #[allow(unused_imports)]
+            pub use {__cmd__camel_case_cmd, __tauri_command_name_camel_case_cmd};
+        "#;
+
+        let commands = parse_expanded_commands(code, &test_path()).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].name, "camel_case_cmd");
+    }
+
+    #[test]
+    fn parse_expanded_commands_ignores_unrelated_uses() {
+        // Plain `pub use` statements without the `__cmd__` prefix must
+        // not be mistaken for commands. The function below has a
+        // `pub use other_name;` sibling but no `__cmd__` marker — it is
+        // not a Tauri command.
+        let code = r#"
+            pub fn not_a_command(x: i32) -> i32 { x }
+            pub use other_name;
+        "#;
+
+        let commands = parse_expanded_commands(code, &test_path()).unwrap();
+        assert!(commands.is_empty(), "got {:?}", commands);
+    }
+
+    #[test]
+    fn parse_expanded_commands_descends_into_nested_mods() {
+        // Marker can be at any depth; the walker must find the fn at
+        // the same depth as the marker.
+        let code = r#"
+            mod commands {
+                mod watch {
+                    pub fn subscribe_node_watch() -> Result<String, String> {
+                        unimplemented!()
+                    }
+                    #[allow(unused_imports)]
+                    pub use __cmd__subscribe_node_watch;
+                }
+            }
+        "#;
+
+        let commands = parse_expanded_commands(code, &test_path()).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].name, "subscribe_node_watch");
+    }
+
+    #[test]
+    fn parse_expanded_commands_finds_method_in_impl() {
+        let code = r#"
+            impl Service {
+                pub fn list_pods(namespace: String) -> Result<String, String> {
+                    Ok(namespace)
+                }
+            }
+            #[allow(unused_imports)]
+            pub use __cmd__list_pods;
+        "#;
+
+        let commands = parse_expanded_commands(code, &test_path()).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].name, "list_pods");
     }
 }
