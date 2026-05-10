@@ -50,6 +50,129 @@ pub fn parse_commands(content: &str, source_file: &Path) -> Result<Vec<TauriComm
     Ok(commands)
 }
 
+/// Parse Tauri commands from `cargo expand` output.
+///
+/// `#[tauri::command]` is a procedural macro, so by the time the source
+/// has been through `cargo expand` the attribute is gone — the original
+/// `fn name(...)` remains, and the macro has emitted a sibling
+/// `__cmd__name` mod plus a `pub use __cmd__name;` re-export. The
+/// re-export is what Tauri's `generate_handler!` macro keys off, so it
+/// is the most reliable post-expansion marker we have.
+///
+/// Strategy: walk the expanded module tree, collect every `__cmd__X`
+/// name that appears in a `use` item, then walk again and accept any
+/// `fn X(...)` whose name matches. This catches commands emitted by a
+/// `macro_rules!` that stamps out N `#[tauri::command]` items —
+/// [`parse_commands`] cannot see them because the attribute the macro
+/// generated has already been consumed by expansion.
+///
+/// # Caveats
+///
+/// * **`__cmd__X` is a Tauri-internal naming convention.** A user who
+///   manually defines `pub use __cmd__foo;` for unrelated reasons would
+///   produce a phantom command. In practice this is a non-issue —
+///   intended for the output of `cargo expand`, where the prefix only
+///   appears as a Tauri-emitted marker.
+/// * **`rename_all` is silently dropped.** Expansion consumes the
+///   `#[tauri::command(rename_all = "...")]` attribute and bakes the
+///   renaming into the generated `__cmd__X` shim, not back into a
+///   surviving attribute on `fn X`. Macro-generated commands that need
+///   `rename_all` are therefore not honoured by this path. Tauri's own
+///   `macro_rules!` patterns rarely use `rename_all`, so this hasn't
+///   blocked real consumers; if it ever does, parsing the `__cmd__X`
+///   mod body is the place to recover it.
+pub fn parse_expanded_commands(content: &str, source_file: &Path) -> Result<Vec<TauriCommand>> {
+    let syntax = syn::parse_file(content)?;
+    let mut command_names = std::collections::HashSet::new();
+    collect_expanded_command_names(&syntax.items, &mut command_names);
+
+    let mut commands = Vec::new();
+    extract_commands_by_name(&syntax.items, &command_names, source_file, &mut commands);
+    Ok(commands)
+}
+
+/// Recursively gather every `X` from `pub use __cmd__X;` (and bare
+/// `use __cmd__X;`) anywhere in the tree, descending into inline
+/// modules. Tauri's expansion of `#[tauri::command]` emits exactly one
+/// such re-export per command, so the set of names this returns is the
+/// authoritative list of commands defined under `items`.
+fn collect_expanded_command_names(
+    items: &[syn::Item],
+    names: &mut std::collections::HashSet<String>,
+) {
+    for item in items {
+        match item {
+            syn::Item::Use(use_item) => {
+                walk_use_tree(&use_item.tree, names);
+            }
+            syn::Item::Mod(module) => {
+                if let Some((_, inner)) = &module.content {
+                    collect_expanded_command_names(inner, names);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn walk_use_tree(tree: &syn::UseTree, names: &mut std::collections::HashSet<String>) {
+    match tree {
+        syn::UseTree::Path(path) => walk_use_tree(&path.tree, names),
+        syn::UseTree::Group(group) => {
+            for inner in &group.items {
+                walk_use_tree(inner, names);
+            }
+        }
+        syn::UseTree::Name(name) => {
+            let ident = name.ident.to_string();
+            if let Some(stripped) = ident.strip_prefix("__cmd__") {
+                names.insert(stripped.to_string());
+            }
+        }
+        syn::UseTree::Rename(rename) => {
+            let ident = rename.ident.to_string();
+            if let Some(stripped) = ident.strip_prefix("__cmd__") {
+                names.insert(stripped.to_string());
+            }
+        }
+        syn::UseTree::Glob(_) => {}
+    }
+}
+
+fn extract_commands_by_name(
+    items: &[syn::Item],
+    names: &std::collections::HashSet<String>,
+    source_file: &Path,
+    out: &mut Vec<TauriCommand>,
+) {
+    for item in items {
+        match item {
+            syn::Item::Fn(func) if names.contains(&func.sig.ident.to_string()) => {
+                if let Some(cmd) = parse_command_fn(func, source_file) {
+                    out.push(cmd);
+                }
+            }
+            syn::Item::Impl(impl_block) => {
+                for impl_item in &impl_block.items {
+                    if let syn::ImplItem::Fn(method) = impl_item {
+                        if names.contains(&method.sig.ident.to_string()) {
+                            if let Some(cmd) = parse_command_method(method, source_file) {
+                                out.push(cmd);
+                            }
+                        }
+                    }
+                }
+            }
+            syn::Item::Mod(module) => {
+                if let Some((_, inner)) = &module.content {
+                    extract_commands_by_name(inner, names, source_file, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 /// Check if a function has the #[tauri::command] attribute
 fn is_tauri_command(func: &ItemFn) -> bool {
     func.attrs.iter().any(is_tauri_command_attr)

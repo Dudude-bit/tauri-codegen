@@ -16,7 +16,9 @@ use crate::generator::{
 };
 use crate::known_types;
 use crate::models::{RustEnum, RustStruct, RustType, RustTypeAlias, TauriCommand};
-use crate::parser::{parse_commands, parse_types, ParseOptions, ParsedTypes};
+use crate::parser::{
+    parse_commands, parse_expanded_commands, parse_types, ParseOptions, ParsedTypes,
+};
 use crate::resolver::ModuleResolver;
 use crate::scanner::Scanner;
 
@@ -279,16 +281,24 @@ impl Pipeline {
         // that stamps out e.g. 16 typed Tauri commands shows up in
         // raw source as a single macro invocation — `parse_commands`
         // sees nothing to extract. cargo expand has already replaced
-        // every macro call site with the actual function items, so
-        // re-running `parse_commands` on the expanded blob recovers
-        // them. We dedupe by command name (uniqueness is later
-        // enforced by `check_duplicate_command_names`) so commands
-        // already seen in real source files keep their original path
-        // — only previously-invisible macro-generated ones get the
-        // synthetic `<cargo-expand>` source path.
+        // every macro call site with the actual function items.
+        //
+        // We must use `parse_expanded_commands` (not `parse_commands`)
+        // because the `#[tauri::command]` proc-macro is consumed
+        // *during* expansion: the attribute disappears from the
+        // function and the macro emits a sibling `__cmd__name` mod
+        // plus a `pub use __cmd__name;` re-export. Post-expansion the
+        // re-export is the only reliable marker that says
+        // "this fn is a Tauri command."
+        //
+        // Dedupe by command name (uniqueness is enforced later by
+        // `check_duplicate_command_names`) so commands already seen
+        // in real source files keep their original path — only
+        // previously-invisible macro-generated ones get the synthetic
+        // `<cargo-expand>` source path.
         if let Some(code) = expanded_code {
             let expanded_path = PathBuf::from("<cargo-expand>");
-            match parse_commands(code, &expanded_path) {
+            match parse_expanded_commands(code, &expanded_path) {
                 Ok(expanded_commands) => {
                     let known: std::collections::HashSet<String> =
                         commands.iter().map(|c| c.name.clone()).collect();

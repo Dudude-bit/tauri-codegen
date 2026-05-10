@@ -341,17 +341,23 @@ fn parse_files_picks_up_macro_generated_commands_from_expanded_code() {
         "#,
     );
 
-    // Synthetic cargo-expand output: what `cargo expand` would produce
-    // for the macro invocations above. Functions are now visible.
+    // Synthetic cargo-expand output: this matches what `cargo expand`
+    // *actually* produces — `#[tauri::command]` has been consumed by
+    // expansion, the function is left bare, and the proc-macro emits a
+    // sibling `pub use __cmd__name;` re-export that becomes the only
+    // marker downstream tooling can key off.
     let expanded_code = r#"
-        #[tauri::command]
         pub async fn subscribe_configmap_watch(namespace: String) -> Result<String, String> {
             Ok(namespace)
         }
-        #[tauri::command]
+        #[allow(unused_imports)]
+        pub use __cmd__subscribe_configmap_watch;
+
         pub async fn subscribe_secret_watch(namespace: String) -> Result<String, String> {
             Ok(namespace)
         }
+        #[allow(unused_imports)]
+        pub use __cmd__subscribe_secret_watch;
     "#;
 
     let mut config = crate::config::Config::default_config();
@@ -403,10 +409,11 @@ fn parse_files_keeps_source_path_when_command_exists_in_both() {
     );
 
     let expanded_code = r#"
-        #[tauri::command]
         pub async fn list_pods(namespace: String) -> Result<String, String> {
             Ok(namespace)
         }
+        #[allow(unused_imports)]
+        pub use __cmd__list_pods;
     "#;
 
     let mut config = crate::config::Config::default_config();
