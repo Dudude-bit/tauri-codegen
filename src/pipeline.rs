@@ -274,6 +274,45 @@ impl Pipeline {
             }
         }
 
+        // Pick up macro-generated #[tauri::command] functions from
+        // cargo-expand output. Without this step, a `macro_rules!`
+        // that stamps out e.g. 16 typed Tauri commands shows up in
+        // raw source as a single macro invocation — `parse_commands`
+        // sees nothing to extract. cargo expand has already replaced
+        // every macro call site with the actual function items, so
+        // re-running `parse_commands` on the expanded blob recovers
+        // them. We dedupe by command name (uniqueness is later
+        // enforced by `check_duplicate_command_names`) so commands
+        // already seen in real source files keep their original path
+        // — only previously-invisible macro-generated ones get the
+        // synthetic `<cargo-expand>` source path.
+        if let Some(code) = expanded_code {
+            let expanded_path = PathBuf::from("<cargo-expand>");
+            match parse_commands(code, &expanded_path) {
+                Ok(expanded_commands) => {
+                    let known: std::collections::HashSet<String> =
+                        commands.iter().map(|c| c.name.clone()).collect();
+                    let new_commands: Vec<_> = expanded_commands
+                        .into_iter()
+                        .filter(|c| !known.contains(&c.name))
+                        .collect();
+                    if !new_commands.is_empty() {
+                        self.diag.debug(format!(
+                            "Found {} additional commands from cargo expand (macro-generated)",
+                            new_commands.len()
+                        ));
+                        commands.extend(new_commands);
+                    }
+                }
+                Err(e) => {
+                    self.diag.warn(format!(
+                        "Failed to parse commands from cargo expand output: {}",
+                        e
+                    ));
+                }
+            }
+        }
+
         // Now register cargo-expand types, but ONLY if they don't already exist in source files.
         // This prevents the "ambiguous type" bug while still allowing macro-generated types
         // (that don't exist in source) to be resolved.

@@ -317,3 +317,119 @@ fn test_collect_reachable_types_handles_mutually_recursive_structs() {
     assert_eq!(result.structs.iter().filter(|s| s.name == "A").count(), 1);
     assert_eq!(result.structs.iter().filter(|s| s.name == "B").count(), 1);
 }
+
+#[test]
+fn parse_files_picks_up_macro_generated_commands_from_expanded_code() {
+    // A `macro_rules!` that stamps out N `#[tauri::command]` functions
+    // shows up in raw source as a single macro invocation — `parse_commands`
+    // sees no commands. cargo expand replaces the call site with the
+    // actual functions, so we re-parse the expanded blob and merge.
+    // Without this the generated TS misses every macro-generated command.
+    let temp_dir = tempfile::tempdir().unwrap();
+    let src_dir = temp_dir.path().join("src");
+
+    // Raw file: just a macro invocation. `syn::parse_file` accepts this
+    // (it's a valid `macro_rules!` call site), but `parse_commands` will
+    // not extract anything because the body of the macro hasn't been
+    // expanded yet.
+    let raw_path = src_dir.join("watch.rs");
+    write_file(
+        &raw_path,
+        r#"
+            subscribe_namespaced!(ConfigMap, "configmap");
+            subscribe_namespaced!(Secret, "secret");
+        "#,
+    );
+
+    // Synthetic cargo-expand output: what `cargo expand` would produce
+    // for the macro invocations above. Functions are now visible.
+    let expanded_code = r#"
+        #[tauri::command]
+        pub async fn subscribe_configmap_watch(namespace: String) -> Result<String, String> {
+            Ok(namespace)
+        }
+        #[tauri::command]
+        pub async fn subscribe_secret_watch(namespace: String) -> Result<String, String> {
+            Ok(namespace)
+        }
+    "#;
+
+    let mut config = crate::config::Config::default_config();
+    config.input.source_dir = src_dir.clone();
+
+    let pipeline = Pipeline::new(false);
+    let (commands, _resolver, _expanded_types) = pipeline
+        .parse_files(&[raw_path], &config, Some(expanded_code))
+        .expect("parse_files should succeed");
+
+    let names: Vec<&str> = commands.iter().map(|c| c.name.as_str()).collect();
+    assert!(
+        names.contains(&"subscribe_configmap_watch"),
+        "macro-generated subscribe_configmap_watch missing; got {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"subscribe_secret_watch"),
+        "macro-generated subscribe_secret_watch missing; got {:?}",
+        names
+    );
+    let synthetic_path = PathBuf::from("<cargo-expand>");
+    for cmd in &commands {
+        assert_eq!(
+            cmd.source_file, synthetic_path,
+            "macro-generated command should carry the cargo-expand virtual path"
+        );
+    }
+}
+
+#[test]
+fn parse_files_keeps_source_path_when_command_exists_in_both() {
+    // If a command appears in both raw source AND in cargo expand output
+    // (cargo expand prints out everything, not just macro-generated items),
+    // the file-based entry wins so the original source path is preserved
+    // for downstream diagnostics. The expanded duplicate is dropped.
+    let temp_dir = tempfile::tempdir().unwrap();
+    let src_dir = temp_dir.path().join("src");
+
+    let raw_path = src_dir.join("commands.rs");
+    write_file(
+        &raw_path,
+        r#"
+            #[tauri::command]
+            pub async fn list_pods(namespace: String) -> Result<String, String> {
+                Ok(namespace)
+            }
+        "#,
+    );
+
+    let expanded_code = r#"
+        #[tauri::command]
+        pub async fn list_pods(namespace: String) -> Result<String, String> {
+            Ok(namespace)
+        }
+    "#;
+
+    let mut config = crate::config::Config::default_config();
+    config.input.source_dir = src_dir.clone();
+
+    let pipeline = Pipeline::new(false);
+    let (commands, _resolver, _expanded_types) = pipeline
+        .parse_files(
+            std::slice::from_ref(&raw_path),
+            &config,
+            Some(expanded_code),
+        )
+        .expect("parse_files should succeed");
+
+    let pods: Vec<&TauriCommand> = commands.iter().filter(|c| c.name == "list_pods").collect();
+    assert_eq!(
+        pods.len(),
+        1,
+        "list_pods must be deduped, got {:?}",
+        commands.iter().map(|c| &c.name).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        pods[0].source_file, raw_path,
+        "raw-source entry must win over the cargo-expand duplicate"
+    );
+}
