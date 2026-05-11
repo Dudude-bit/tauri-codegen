@@ -169,7 +169,7 @@ mod tests {
         let config_content = format!(
             r#"
 [input]
-source_dir = "{}"
+source_dir = '{}'
 exclude = ["tests"]
 
 [output]
@@ -199,7 +199,7 @@ commands_file = "commands.ts"
         let config_content = format!(
             r#"
 [input]
-source_dir = "{}"
+source_dir = '{}'
 
 [output]
 types_file = "types.ts"
@@ -234,7 +234,7 @@ function_suffix = "Cmd"
         let config_content = format!(
             r#"
 [input]
-source_dir = "{}"
+source_dir = '{}'
 
 [output]
 types_file = "types.ts"
@@ -402,7 +402,7 @@ commands_file = "commands.ts"
         let config_content = format!(
             r#"
 [input]
-source_dir = "{}"
+source_dir = '{}'
 
 [output]
 types_file = "types.ts"
