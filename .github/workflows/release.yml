@@ -34,7 +34,7 @@ jobs:
     name: verify tagged ref
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -57,7 +57,7 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - name: Publish (idempotent — tolerate "already exists")
         env:
@@ -94,7 +94,7 @@ jobs:
     needs: publish-derive
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - name: Wait for crates.io index to catch up
         # Gives the sparse index time to learn about a freshly-published
@@ -128,6 +128,6 @@ jobs:
           echo "::error::Publish failed with an unrecognised error; aborting."
           exit "$status"
       - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           generate_release_notes: true
