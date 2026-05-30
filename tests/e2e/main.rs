@@ -13,6 +13,7 @@
 mod helpers;
 
 mod basic;
+mod channels;
 mod errors;
 mod init;
 mod path_qualified;

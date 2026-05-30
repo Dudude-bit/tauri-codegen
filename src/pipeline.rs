@@ -12,7 +12,10 @@ use crate::cargo_expand::{find_cargo_manifest, run_cargo_expand};
 use crate::config::Config;
 use crate::diagnostics::Diagnostics;
 use crate::generator::{
-    commands_gen::generate_commands_file, types_gen::generate_types_file, GeneratorContext,
+    commands_gen::{collect_channel_type_aliases, generate_commands_file},
+    helpers_gen::generate_helpers_file,
+    types_gen::generate_types_file,
+    GeneratorContext,
 };
 use crate::known_types;
 use crate::models::{RustEnum, RustStruct, RustType, RustTypeAlias, TauriCommand};
@@ -368,8 +371,18 @@ impl Pipeline {
             ctx.register_type(&alias.name);
         }
 
-        // Generate types.ts
-        let types_content = generate_types_file(filtered_structs, filtered_enums, aliases, &ctx);
+        // Collect channel type aliases (used in both types.ts and helpers.ts decision)
+        let channel_aliases = collect_channel_type_aliases(commands, &ctx);
+
+        // Generate types.ts — append channel type aliases at the end
+        let mut types_content =
+            generate_types_file(filtered_structs, filtered_enums, aliases, &ctx);
+        for (alias_name, inner_ts) in &channel_aliases {
+            types_content.push_str(&format!("export type {} = {};\n", alias_name, inner_ts));
+        }
+        if !channel_aliases.is_empty() {
+            types_content.push('\n');
+        }
 
         fs::write(&config.output.types_file, &types_content).with_context(|| {
             format!(
@@ -400,6 +413,23 @@ impl Pipeline {
             "Generated: {}",
             config.output.commands_file.display()
         ));
+
+        // Generate helpers.ts when any command uses a Channel arg
+        if !channel_aliases.is_empty() {
+            let helpers_path = config
+                .output
+                .commands_file
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."))
+                .join("helpers.ts");
+
+            fs::write(&helpers_path, generate_helpers_file()).with_context(|| {
+                format!("Failed to write helpers file: {}", helpers_path.display())
+            })?;
+
+            self.diag
+                .info(format!("Generated: {}", helpers_path.display()));
+        }
 
         Ok(())
     }

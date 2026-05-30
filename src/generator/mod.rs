@@ -1,4 +1,5 @@
 pub mod commands_gen;
+pub mod helpers_gen;
 pub mod type_mapper;
 pub mod types_gen;
 

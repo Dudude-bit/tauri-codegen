@@ -81,6 +81,17 @@ pub fn parse_type_with_context(ty: &Type, generic_params: &HashSet<String>) -> R
                             RustType::Unknown("Result<?>".to_string())
                         }
                     }
+                    "Channel" => {
+                        if let Some(inner) = extract_single_generic(&segment.arguments) {
+                            RustType::Channel(Box::new(parse_type_with_context(
+                                &inner,
+                                generic_params,
+                            )))
+                        } else {
+                            RustType::Unknown("Channel<?>".to_string())
+                        }
+                    }
+
                     "HashMap" | "BTreeMap" => {
                         if let Some((key, value)) = extract_two_generics(&segment.arguments) {
                             RustType::HashMap {

@@ -36,6 +36,11 @@ pub fn rust_to_typescript(rust_type: &RustType, ctx: &GeneratorContext) -> Strin
             rust_to_typescript(ok, ctx)
         }
 
+        RustType::Channel(inner) => {
+            let inner_ts = rust_to_typescript(inner, ctx);
+            format!("Channel<{}>", inner_ts)
+        }
+
         RustType::HashMap { key, value } => {
             let key_ts = rust_to_typescript(key, ctx);
             let value_ts = rust_to_typescript(value, ctx);
