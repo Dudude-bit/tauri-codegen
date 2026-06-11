@@ -16,6 +16,9 @@ pub enum RustType {
     },
     /// Tuple types
     Tuple(Vec<RustType>),
+    /// `tauri::ipc::Channel<T>` — streaming channel passed from the frontend.
+    /// Unlike injected types (State, Window), this IS present in the TS signature.
+    Channel(Box<RustType>),
     /// Reference to a custom type (struct or enum), optionally with bound
     /// generic arguments. `Page<User>` is `Custom { name: "Page", args:
     /// [Custom { name: "User", args: vec![] }] }`. `args` is empty for
@@ -42,7 +45,10 @@ pub fn walk_custom_type_names<F: FnMut(&str)>(ty: &RustType, visit: &mut F) {
                 walk_custom_type_names(arg, visit);
             }
         }
-        RustType::Vec(inner) | RustType::Option(inner) | RustType::Result(inner) => {
+        RustType::Vec(inner)
+        | RustType::Option(inner)
+        | RustType::Result(inner)
+        | RustType::Channel(inner) => {
             walk_custom_type_names(inner, visit);
         }
         RustType::HashMap { key, value } => {

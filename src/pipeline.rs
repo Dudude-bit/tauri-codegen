@@ -12,7 +12,9 @@ use crate::cargo_expand::{find_cargo_manifest, run_cargo_expand};
 use crate::config::Config;
 use crate::diagnostics::Diagnostics;
 use crate::generator::{
-    commands_gen::generate_commands_file, types_gen::generate_types_file, GeneratorContext,
+    commands_gen::{collect_channel_type_aliases, generate_commands_file},
+    types_gen::generate_types_file,
+    GeneratorContext,
 };
 use crate::known_types;
 use crate::models::{RustEnum, RustStruct, RustType, RustTypeAlias, TauriCommand};
@@ -368,8 +370,17 @@ impl Pipeline {
             ctx.register_type(&alias.name);
         }
 
-        // Generate types.ts
-        let types_content = generate_types_file(filtered_structs, filtered_enums, aliases, &ctx);
+        let channel_aliases = collect_channel_type_aliases(commands, &ctx);
+
+        // Generate types.ts — append channel type aliases at the end
+        let mut types_content =
+            generate_types_file(filtered_structs, filtered_enums, aliases, &ctx);
+        for (alias_name, inner_ts) in &channel_aliases {
+            types_content.push_str(&format!("export type {} = {};\n", alias_name, inner_ts));
+        }
+        if !channel_aliases.is_empty() {
+            types_content.push('\n');
+        }
 
         fs::write(&config.output.types_file, &types_content).with_context(|| {
             format!(

@@ -4,6 +4,17 @@ All notable changes to `tauri-ts-generator` are listed here. Format
 loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [SemVer](https://semver.org/).
 
+## Unreleased
+
+### Added
+
+- Support for `tauri::ipc::Channel<T>` command arguments (#4, thanks
+  @lukas-runge). Channel args stay in the generated TypeScript signature
+  (unlike injected types such as `State`), are typed as `Channel<T>` with
+  the import from `@tauri-apps/api/core` added only when used, and each
+  gets an exported `<Command><Arg>ChannelType` payload alias in the types
+  file.
+
 ## 2.0.3 — 2026-05-10
 
 ### Fixed
