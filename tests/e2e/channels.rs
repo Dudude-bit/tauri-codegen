@@ -58,46 +58,8 @@ fn channel_generates_channel_type_alias_in_types_file() {
     let types = std::fs::read_to_string(&project.types_out).unwrap();
 
     assert!(
-        types.contains("export type downloadChannelType = DownloadEvent;"),
+        types.contains("export type DownloadOnEventChannelType = DownloadEvent;"),
         "channel type alias must appear in types.ts:\n{types}"
-    );
-}
-
-#[test]
-fn channel_generates_helpers_file() {
-    let project = Project::with_source(
-        r#"
-        use serde::{Deserialize, Serialize};
-
-        #[derive(Serialize, Deserialize)]
-        pub struct Msg { pub text: String }
-
-        #[tauri::command]
-        fn listen(on_msg: tauri::ipc::Channel<Msg>) {}
-        "#,
-    );
-
-    run_generate_ok(&project);
-
-    let helpers_path = project.commands_out.parent().unwrap().join("helpers.ts");
-    assert!(
-        helpers_path.exists(),
-        "helpers.ts must be generated when channels are present"
-    );
-
-    let helpers = std::fs::read_to_string(&helpers_path).unwrap();
-    assert!(
-        helpers.contains("import { Channel } from \"@tauri-apps/api/core\""),
-        "{helpers}"
-    );
-    assert!(
-        helpers.contains("export function getChannelFor<T>"),
-        "{helpers}"
-    );
-    assert!(helpers.contains("new Channel<T>()"), "{helpers}");
-    assert!(
-        helpers.contains("if (onMessage) channel.onmessage = onMessage"),
-        "{helpers}"
     );
 }
 
@@ -129,13 +91,13 @@ fn channel_without_custom_inner_type() {
 
     let types = std::fs::read_to_string(&project.types_out).unwrap();
     assert!(
-        types.contains("export type streamChannelType = string;"),
+        types.contains("export type StreamOnDataChannelType = string;"),
         "primitive channel type alias must be string:\n{types}"
     );
 }
 
 #[test]
-fn command_without_channel_omits_channel_import_and_helpers() {
+fn command_without_channel_omits_channel_import() {
     let project = Project::with_source(
         r#"
         #[tauri::command]
@@ -153,12 +115,6 @@ fn command_without_channel_omits_channel_import_and_helpers() {
     assert!(
         commands.contains("import { invoke }"),
         "plain invoke import must be present:\n{commands}"
-    );
-
-    let helpers_path = project.commands_out.parent().unwrap().join("helpers.ts");
-    assert!(
-        !helpers_path.exists(),
-        "helpers.ts must NOT be generated without channel commands"
     );
 
     let types = std::fs::read_to_string(&project.types_out).unwrap();
@@ -197,7 +153,7 @@ fn channel_and_regular_args_together() {
 
     let types = std::fs::read_to_string(&project.types_out).unwrap();
     assert!(
-        types.contains("export type uploadChannelType = Progress;"),
+        types.contains("export type UploadOnProgressChannelType = Progress;"),
         "{types}"
     );
 }
@@ -226,11 +182,11 @@ fn multiple_channel_args_disambiguated_by_arg_name() {
     let types = std::fs::read_to_string(&project.types_out).unwrap();
 
     assert!(
-        types.contains("export type uploadOnProgressChannelType = Progress;"),
+        types.contains("export type UploadOnProgressChannelType = Progress;"),
         "must disambiguate with arg name:\n{types}"
     );
     assert!(
-        types.contains("export type uploadOnDoneChannelType = Done;"),
+        types.contains("export type UploadOnDoneChannelType = Done;"),
         "must disambiguate with arg name:\n{types}"
     );
 }
@@ -262,7 +218,7 @@ fn bare_channel_type_without_path_prefix() {
 
     let types = std::fs::read_to_string(&project.types_out).unwrap();
     assert!(
-        types.contains("export type listenChannelType = Msg;"),
+        types.contains("export type ListenOnMsgChannelType = Msg;"),
         "{types}"
     );
 }

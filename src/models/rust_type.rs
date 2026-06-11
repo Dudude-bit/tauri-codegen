@@ -60,10 +60,7 @@ pub fn walk_custom_type_names<F: FnMut(&str)>(ty: &RustType, visit: &mut F) {
                 walk_custom_type_names(t, visit);
             }
         }
-        RustType::Primitive(_)
-        | RustType::Generic(_)
-        | RustType::Unit
-        | RustType::Unknown(_) => {}
+        RustType::Primitive(_) | RustType::Generic(_) | RustType::Unit | RustType::Unknown(_) => {}
     }
 }
 
