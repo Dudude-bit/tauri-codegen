@@ -4,7 +4,7 @@ All notable changes to `tauri-ts-generator` are listed here. Format
 loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 versioning follows [SemVer](https://semver.org/).
 
-## Unreleased
+## 2.1.0 — 2026-06-11
 
 ### Added
 
