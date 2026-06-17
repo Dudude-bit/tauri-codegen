@@ -53,6 +53,70 @@ cargo run --release -- generate
     tauri-ts-generator generate
     ```
 
+## Build script (`build.rs`) integration
+
+The CLI is the common path, but the crate is also a library: the whole CLI is a thin
+wrapper over two public types, `Config` and `Pipeline`. That makes it easy to regenerate
+bindings on every build instead of by hand.
+
+Add it as a build dependency:
+
+```toml
+# src-tauri/Cargo.toml
+[build-dependencies]
+tauri-ts-generator = "2.1"
+```
+
+Then drive the pipeline from your build script. A Tauri project already has a `build.rs`
+calling `tauri_build::build()` — add to it, don't replace it:
+
+```rust
+// src-tauri/build.rs
+use std::path::PathBuf;
+use tauri_ts_generator::config::{Config, InputConfig, NamingConfig, OutputConfig};
+use tauri_ts_generator::pipeline::Pipeline;
+
+fn main() {
+    tauri_build::build(); // keep the existing Tauri build step
+
+    // Only regenerate when the Rust command sources change.
+    println!("cargo:rerun-if-changed=src");
+
+    let config = Config {
+        input: InputConfig {
+            source_dir: PathBuf::from("src"),
+            exclude: vec!["tests".into()],
+            use_cargo_expand: false,
+            cargo_manifest: None,
+        },
+        output: OutputConfig {
+            // Write into the frontend tree, outside the src-tauri crate.
+            types_file: PathBuf::from("../src/bindings/types.ts"),
+            commands_file: PathBuf::from("../src/bindings/commands.ts"),
+        },
+        naming: NamingConfig::default(),
+    };
+
+    // Don't fail the whole build if codegen hits a snag — surface a warning instead.
+    if let Err(e) = Pipeline::new(false).run(&config) {
+        println!("cargo:warning=tauri-ts-generator: {e}");
+    }
+}
+```
+
+Three things worth knowing:
+
+- **Write the output outside the `src-tauri` crate** (e.g. `../src/bindings`, in the frontend
+  tree). If you write into `src-tauri/src` while also using `rerun-if-changed=src`, you get a
+  rebuild loop: the build script writes a file under `src`, Cargo sees `src` change, and runs
+  the build script again. The frontend dir is outside the crate, so writing there doesn't
+  retrigger the Rust build.
+- **Keep `use_cargo_expand = false` here.** That flag shells out to `cargo expand`, i.e. it
+  runs Cargo on top of the build that's already in progress. For macro-generated commands,
+  prefer a separate CLI run over doing it from `build.rs`.
+- The generator pulls in `syn` and `clap`, so it adds a bit to your build-dependency compile
+  time. If that bothers you, stick with the CLI and a `package.json` script / Makefile target.
+
 ## Configuration (`tauri-codegen.toml`)
 
 Customize the generator behavior using the TOML configuration file.
